@@ -1,5 +1,5 @@
 BINARY := cycomagent
-VERSION ?= 0.4.2-termux-dev
+VERSION ?= 0.4.3-multiplatform-dev
 GO ?= go
 LDFLAGS := -s -w -X main.version=$(VERSION)
 STAGE := .release/CyComAgent-MCP

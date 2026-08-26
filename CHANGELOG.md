@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3-multiplatform-dev
+
+- Added the Windows-native PowerShell MCP bridge to the main repository.
+- Added Windows install/uninstall scripts using a loopback-only SYSTEM Scheduled Task.
+- Added Windows CI syntax validation and documented its six native tools/security boundary.
+- Kept runtime token/log files outside source control.
+
 ## 0.4.2-termux-dev
 
 - Fixed bundled OpenAI tunnel-client DNS resolution on Android/Termux ARM64 when built without cgo.

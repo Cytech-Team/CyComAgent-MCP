@@ -24,6 +24,7 @@ plugins.d/
 *.pfx
 control-plane-api-key
 tunnel-id
+bridge.token
 
 # Editor / OS
 .DS_Store

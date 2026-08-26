@@ -42,3 +42,20 @@ jobs:
         with:
           name: cycomagent-termux-arm64
           path: dist/cycomagent-termux-arm64
+
+  windows-bridge:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse Windows PowerShell scripts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem platform/windows -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            if ($null -ne $errors -and $errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Error
+            }
+          }
