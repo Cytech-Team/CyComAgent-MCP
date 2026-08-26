@@ -1,12 +1,13 @@
 BINARY := cycomagent
-VERSION ?= 0.4.4-multiplatform-dev
+VERSION ?= 0.4.5-macos-dev
 GO ?= go
 LDFLAGS := -s -w -X main.version=$(VERSION)
 STAGE := .release/CyComAgent-MCP
 TERMUX_STAGE := .release-termux/CyComAgent-MCP
+MACOS_STAGE := .release-macos/CyComAgent-MCP
 RELEASE_NOTES := RELEASE_NOTES_v$(VERSION).md
 
-.PHONY: all test vet build build-termux build-termux-tunnel clean release release-termux release-windows release-all
+.PHONY: all test vet build build-termux build-termux-tunnel build-macos clean release release-termux release-windows release-macos release-all
 all: test build
 
 test:
@@ -23,6 +24,11 @@ build:
 build-termux:
 	mkdir -p dist
 	CGO_ENABLED=0 GOOS=android GOARCH=arm64 GOTOOLCHAIN=local $(GO) build -trimpath -ldflags='$(LDFLAGS)' -o dist/cycomagent-termux-arm64 ./cmd/cycomagent
+
+build-macos:
+	mkdir -p dist
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 GOTOOLCHAIN=local $(GO) build -trimpath -ldflags='$(LDFLAGS)' -o dist/cycomagent-macos-arm64 ./cmd/cycomagent
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 GOTOOLCHAIN=local $(GO) build -trimpath -ldflags='$(LDFLAGS)' -o dist/cycomagent-macos-amd64 ./cmd/cycomagent
 
 build-termux-tunnel:
 	./scripts/build-termux-tunnel.sh
@@ -60,7 +66,19 @@ release-windows:
 	sha256sum dist/CyComAgent-MCP-v$(VERSION)-windows.zip | sed 's#  dist/#  #' > dist/SHA256SUMS-windows
 	rm -rf .release-windows
 
-release-all: release release-termux release-windows
+release-macos: test vet build-macos
+	rm -rf .release-macos
+	mkdir -p $(MACOS_STAGE)/dist $(MACOS_STAGE)/scripts
+	cp scripts/install-launchd.sh $(MACOS_STAGE)/scripts/
+	cp README.md CHANGELOG.md LICENSE SECURITY.md THIRD_PARTY.md ROADMAP.md $(RELEASE_NOTES) $(MACOS_STAGE)/
+	for arch in arm64 amd64; do \
+		cp dist/cycomagent-macos-$$arch $(MACOS_STAGE)/dist/cycomagent; \
+		tar -C .release-macos -czf dist/CyComAgent-MCP-v$(VERSION)-macos-$$arch.tar.gz CyComAgent-MCP; \
+	done
+	sha256sum dist/CyComAgent-MCP-v$(VERSION)-macos-arm64.tar.gz dist/CyComAgent-MCP-v$(VERSION)-macos-amd64.tar.gz | sed 's#  dist/#  #' > dist/SHA256SUMS-macos
+	rm -rf .release-macos
+
+release-all: release release-termux release-windows release-macos
 
 clean:
-	rm -rf dist .release .release-termux .release-windows
+	rm -rf dist .release .release-termux .release-windows .release-macos

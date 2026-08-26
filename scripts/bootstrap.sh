@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-VERSION="0.4.4-multiplatform-dev"
+VERSION="0.4.5-macos-dev"
 TAG="v${VERSION}"
 RELEASE_BASE="https://github.com/Cytech-Team/CyComAgent-MCP/releases/download/${TAG}"
 
@@ -21,6 +21,19 @@ make_workdir() {
   mkdir -p "$WORK"
 }
 
+sha256_file() {
+  file=$1
+  if have sha256sum; then
+    sha256sum "$file" | awk '{print $1}'
+  elif have shasum; then
+    shasum -a 256 "$file" | awk '{print $1}'
+  elif have openssl; then
+    openssl dgst -sha256 "$file" | awk '{print $NF}'
+  else
+    fail "SHA-256 tool is required (sha256sum, shasum, or openssl)"
+  fi
+}
+
 download_verified() {
   asset=$1
   sums=$2
@@ -33,7 +46,7 @@ download_verified() {
 
   expected=$(awk -v name="$asset" '$2 == name || $2 == "*" name { print $1; exit }' "$sumfile")
   [ -n "$expected" ] || fail "checksum for $asset is missing from $sums"
-  actual=$(sha256sum "$out" | awk '{print $1}')
+  actual=$(sha256_file "$out")
   [ "$actual" = "$expected" ] || fail "SHA-256 verification failed for $asset"
   say "SHA-256: verified"
 }
@@ -121,6 +134,37 @@ install_linux() {
   say "MCP: http://127.0.0.1:7331/mcp"
 }
 
+install_macos() {
+  case "$(uname -m)" in
+    arm64|aarch64) arch=arm64 ;;
+    x86_64|amd64) arch=amd64 ;;
+    *) fail "macOS experimental release supports Apple Silicon arm64 and Intel x86_64 only" ;;
+  esac
+  have tar || fail "tar is required"
+  have curl || fail "curl is required"
+  if ! have shasum && ! have sha256sum && ! have openssl; then
+    fail "shasum, sha256sum, or openssl is required for checksum verification"
+  fi
+  have launchctl || fail "launchctl is required"
+
+  say "== CyComAgent-MCP $VERSION =="
+  say "Detected: macOS $arch (experimental)"
+  make_workdir
+  asset="CyComAgent-MCP-v${VERSION}-macos-${arch}.tar.gz"
+  download_verified "$asset" "SHA256SUMS-macos"
+  tar -xzf "$WORK/$asset" -C "$WORK"
+  root="$WORK/CyComAgent-MCP"
+  [ -x "$root/scripts/install-launchd.sh" ] || fail "release is missing scripts/install-launchd.sh"
+
+  "$root/scripts/install-launchd.sh"
+
+  say ""
+  say "Installed CyComAgent experimental runtime for macOS."
+  curl -fsS --max-time 3 http://127.0.0.1:7331/health >/dev/null 2>&1 && say "Health: OK" || say "Health: LaunchAgent installed; endpoint may still be starting or awaiting macOS permissions"
+  say "MCP: http://127.0.0.1:7331/mcp"
+  say "Note: local root broker is not supported on macOS."
+}
+
 case "$(uname -s 2>/dev/null || printf unknown)" in
   Linux)
     if [ -n "${PREFIX:-}" ] && printf '%s' "$PREFIX" | grep -q '/com\.termux/'; then
@@ -133,7 +177,7 @@ case "$(uname -s 2>/dev/null || printf unknown)" in
     install_termux
     ;;
   Darwin)
-    fail "macOS is not supported yet"
+    install_macos
     ;;
   *)
     fail "unsupported platform; on Windows use: curl.exe -fsSL https://cdn.cytechteam.site/install/cycomagent.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command -"

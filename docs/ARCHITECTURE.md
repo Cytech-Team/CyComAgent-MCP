@@ -79,10 +79,10 @@ Policy and audit are registry-wide rather than being reimplemented by each tool.
 Examples:
 
 - remote exec -> OpenSSH
-- service control -> systemd
+- service control -> systemd (Linux), launchd/launchctl user domain (macOS), or runit (Termux)
 - container CLI -> Docker or Podman
-- desktop capture -> grim or Spectacle
-- desktop input -> ydotool, wtype, or xdotool
+- desktop capture -> grim/Spectacle on Linux or screencapture on macOS
+- desktop input -> ydotool/wtype/xdotool on Linux; osascript and optional cliclick on macOS
 
 ## Privilege boundary
 

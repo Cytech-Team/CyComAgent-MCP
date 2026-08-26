@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -75,6 +76,11 @@ func desktopCapture(ctx context.Context, raw json.RawMessage, stateDir string) (
 }
 
 func screenshotCommand(path string) (string, string, []string, error) {
+	if runtime.GOOS == "darwin" {
+		if p, err := exec.LookPath("screencapture"); err == nil {
+			return "screencapture", p, []string{"-x", path}, nil
+		}
+	}
 	if p, err := exec.LookPath("spectacle"); err == nil {
 		return "spectacle", p, []string{"-b", "-n", "-o", path}, nil
 	}
@@ -90,7 +96,7 @@ func screenshotCommand(path string) (string, string, []string, error) {
 	if p, err := exec.LookPath("import"); err == nil {
 		return "imagemagick-import", p, []string{"-window", "root", path}, nil
 	}
-	return "", "", nil, fmt.Errorf("no supported screenshot adapter found (spectacle, grim, gnome-screenshot, scrot, import)")
+	return "", "", nil, fmt.Errorf("no supported screenshot adapter found (screencapture, spectacle, grim, gnome-screenshot, scrot, import)")
 }
 
 func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -125,12 +131,20 @@ func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 		}
 		// wtype is ideal when the compositor supports virtual-keyboard;
 		// ydotool is the compositor-independent uinput fallback.
+		if runtime.GOOS == "darwin" {
+			add("osascript", "osascript", "-e", "on run argv", "-e", "tell application \"System Events\" to keystroke (item 1 of argv)", "-e", "end run", in.Text)
+		}
 		add("wtype", "wtype", in.Text)
 		add("ydotool", "ydotool", "type", "--", in.Text)
 		add("xdotool", "xdotool", "type", "--clearmodifiers", "--", in.Text)
 	case "key":
 		if in.Key == "" {
 			return nil, fmt.Errorf("key is required")
+		}
+		if runtime.GOOS == "darwin" {
+			if script, ok := macOSKeyAppleScript(in.Key); ok {
+				add("osascript", "osascript", "-e", script)
+			}
 		}
 		add("wtype", "wtype", "-k", in.Key)
 		add("xdotool", "xdotool", "key", "--clearmodifiers", in.Key)
@@ -142,6 +156,13 @@ func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 		if button == 0 {
 			button = 1
 		}
+		if runtime.GOOS == "darwin" {
+			target := "c:."
+			if in.X != 0 || in.Y != 0 {
+				target = fmt.Sprintf("c:%d,%d", in.X, in.Y)
+			}
+			add("cliclick", "cliclick", target)
+		}
 		add("xdotool", "xdotool", "click", strconv.Itoa(button))
 		code := "0xC0" // left
 		if button == 2 {
@@ -152,6 +173,9 @@ func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 		}
 		add("ydotool", "ydotool", "click", code)
 	case "mouse_move":
+		if runtime.GOOS == "darwin" {
+			add("cliclick", "cliclick", fmt.Sprintf("m:%d,%d", in.X, in.Y))
+		}
 		add("xdotool", "xdotool", "mousemove", strconv.Itoa(in.X), strconv.Itoa(in.Y))
 		add("ydotool", "ydotool", "mousemove", "--absolute", "-x", strconv.Itoa(in.X), "-y", strconv.Itoa(in.Y))
 	default:
@@ -172,6 +196,46 @@ func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 	return nil, fmt.Errorf("all desktop input adapters failed for action %q: %s", in.Action, strings.Join(failures, "; "))
 }
 
+func macOSKeyAppleScript(key string) (string, bool) {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(key)), "+")
+	if len(parts) == 0 {
+		return "", false
+	}
+	base := strings.TrimSpace(parts[len(parts)-1])
+	mods := []string{}
+	for _, raw := range parts[:len(parts)-1] {
+		switch strings.TrimSpace(raw) {
+		case "cmd", "command", "meta", "super":
+			mods = append(mods, "command down")
+		case "ctrl", "control":
+			mods = append(mods, "control down")
+		case "alt", "option":
+			mods = append(mods, "option down")
+		case "shift":
+			mods = append(mods, "shift down")
+		default:
+			return "", false
+		}
+	}
+	codes := map[string]int{
+		"enter": 36, "return": 36, "tab": 48, "space": 49, "backspace": 51,
+		"delete": 51, "escape": 53, "esc": 53, "left": 123, "right": 124,
+		"down": 125, "up": 126, "home": 115, "end": 119, "pageup": 116, "pagedown": 121,
+	}
+	using := ""
+	if len(mods) > 0 {
+		using = " using {" + strings.Join(mods, ", ") + "}"
+	}
+	if code, ok := codes[base]; ok {
+		return fmt.Sprintf("tell application \\\"System Events\\\" to key code %d%s", code, using), true
+	}
+	if len([]rune(base)) == 1 {
+		escaped := strings.ReplaceAll(strings.ReplaceAll(base, "\\\\", "\\\\\\\\"), "\\\"", "\\\\\\\"")
+		return fmt.Sprintf("tell application \\\"System Events\\\" to keystroke \\\"%s\\\"%s", escaped, using), true
+	}
+	return "", false
+}
+
 func runDesktop(ctx context.Context, adapter, cmd string, args []string) (any, error) {
 	c := exec.CommandContext(ctx, cmd, args...)
 	c.Env = desktopEnvironment()
@@ -186,6 +250,11 @@ func runDesktop(ctx context.Context, adapter, cmd string, args []string) (any, e
 // session owned by the same UID. This lets a system service started before
 // login discover Wayland/X11/DBus variables later without being restarted.
 func desktopEnvironment() []string {
+	if runtime.GOOS == "darwin" {
+		// LaunchAgents already inherit the logged-in user's GUI bootstrap domain.
+		// TCC (Screen Recording / Accessibility / Automation) remains authoritative.
+		return os.Environ()
+	}
 	envMap := map[string]string{}
 	for _, entry := range os.Environ() {
 		if i := strings.IndexByte(entry, '='); i > 0 {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.5-macos-dev
+
+- Added experimental macOS support to the shared Go core for Darwin arm64 and amd64.
+- Added user-level launchd/LaunchAgent installation and `launchctl` service management.
+- Added built-in `screencapture` plus AppleScript/optional `cliclick` desktop adapters.
+- Restricted the local root broker capability report to Linux, avoiding false privilege support on macOS.
+- Extended the shared curl bootstrap and release pipeline to macOS with SHA-256 verification.
+- Added macOS CI validation while keeping physical-Mac runtime status explicitly experimental.
+
 ## 0.4.4-multiplatform-dev
 
 - Added shared curl bootstrap installation for Linux amd64 and Android/Termux ARM64.

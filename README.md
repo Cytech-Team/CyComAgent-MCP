@@ -4,7 +4,7 @@
 
 CyComAgent-MCP is an AI-native computer runtime that exposes a real machine — and optional remote machines — as a compact set of composable MCP primitives. The model supplies the reasoning; CyComAgent supplies filesystem, process, persistent job, service, network, desktop, durable state, multi-machine target, policy, audit, plugin, and privileged-execution capabilities.
 
-`v0.4.4-multiplatform-dev` adds one-command curl installers for Linux, Android/Termux, and Windows while keeping all three in one public source tree.
+`v0.4.5-macos-dev` adds experimental macOS support to the shared Go core and the same curl-based release flow used by Linux and Termux, while Windows remains available through its native bridge.
 
 ## What “Full Power” means
 
@@ -195,11 +195,11 @@ This keeps application-specific capabilities outside the generic core.
 - Linux: supported (Full Power path, systemd/root broker available when configured).
 - Android / Termux arm64: development support as a **`mobile_assistant`** runtime (non-root core + semantic Android assistant tools + runit service adapter). Android device root / `su` is **not supported and not planned**. `sudo` on remote SSH targets or inside a non-root userspace/container such as proot remains allowed where that environment provides it.
 - Windows 10/11: development support through the bundled Windows-native PowerShell bridge under `platform/windows` (6 native tools, loopback-only MCP, token auth, optional SYSTEM startup task). This bridge is intentionally smaller than the Linux core and is not yet feature-parity.
-- macOS: not supported.
+- macOS 12+ (experimental): portable Go core builds for Apple Silicon arm64 and Intel amd64, user-level `launchd`/LaunchAgent integration, built-in `screencapture`, and AppleScript/optional `cliclick` desktop input adapters. Local root broker is not supported. This path is CI-validated but has not yet been tested on the project owner's physical Mac hardware.
 
 ## One-command install
 
-Linux amd64 (systemd) and Android/Termux ARM64 use the same command; the installer detects the platform automatically:
+Linux amd64 (systemd), Android/Termux ARM64, and experimental macOS (Apple Silicon arm64 or Intel amd64) use the same command; the installer detects the platform automatically:
 
 ```sh
 curl -fsSL https://cdn.cytechteam.site/install/cycomagent | sh
@@ -211,7 +211,7 @@ Windows 10/11 uses the same curl-based flow but pipes into Windows PowerShell be
 curl.exe -fsSL https://cdn.cytechteam.site/install/cycomagent.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command -
 ```
 
-Each bootstrap downloads an immutable GitHub Release asset and validates its published SHA-256 checksum before installation. Windows may show a UAC prompt because the bridge is installed as a SYSTEM startup task. macOS is not supported yet.
+Each bootstrap downloads an immutable GitHub Release asset and validates its published SHA-256 checksum before installation. Windows may show a UAC prompt because the bridge is installed as a SYSTEM startup task. macOS installs as a user LaunchAgent and may later request normal Screen Recording, Accessibility, or Automation permissions when desktop capabilities are used.
 
 ## Build
 
@@ -222,7 +222,7 @@ make test
 make release
 ```
 
-Linux release binaries use `CGO_ENABLED=0`. Build the Termux/Android arm64 runtime with `make build-termux`; package it with `make release-termux`. The Windows bridge is PowerShell-native and ships from `platform/windows`.
+Linux release binaries use `CGO_ENABLED=0`. Build the Termux/Android arm64 runtime with `make build-termux`; build both Darwin architectures with `make build-macos`; package macOS with `make release-macos`. The Windows bridge is PowerShell-native and ships from `platform/windows`.
 
 ## Run locally
 
@@ -281,7 +281,26 @@ For the Google-Assistant-like phone layer, install the Termux `termux-api` comma
 
 The mobile assistant surface includes device status, speech-to-text, TTS, notifications, location, clipboard, vibration, torch, SMS, calls, camera, microphone recording, contacts, SMS reading, and call-log access where the OS/device supports them. High-sensitivity operations are policy-gated and default to disabled with `allow_sensitive_android: false`.
 
-### Root / sudo boundary on Termux
+## Run on macOS (experimental)
+
+The public POSIX bootstrap auto-detects Darwin:
+
+```sh
+curl -fsSL https://cdn.cytechteam.site/install/cycomagent | sh
+```
+
+Supported release architectures are Apple Silicon `arm64` and Intel `amd64`. The installer places the runtime under `~/Library/Application Support/CyComAgent`, stores state there, writes logs under `~/Library/Logs/CyComAgent`, and registers the user LaunchAgent `com.cytech.cycomagent`. It does not install or emulate the Linux root broker.
+
+Native macOS adapters currently include:
+
+- `launchctl` / LaunchAgent for `service_control`;
+- `screencapture` for `desktop_capture`;
+- `osascript` / System Events for text and keyboard input;
+- optional `cliclick` for pointer movement and clicking.
+
+macOS privacy controls remain authoritative. Screen capture can require **Screen Recording** permission; keyboard/mouse automation can require **Accessibility** and/or **Automation** permission. The macOS path is experimental and CI/build validated, but physical Mac runtime validation is still pending.
+
+## Root / sudo boundary on Termux
 
 CyComAgent deliberately separates **Android device root** from **sudo inside another environment**:
 
@@ -328,11 +347,11 @@ Chaos/recovery scripts are included under `scripts/`.
 
 ## Current limitations
 
-- Linux remains the only Full Power/root-broker-supported local runtime. Termux support currently targets the non-root core runtime.
+- Linux remains the only Full Power/root-broker-supported local runtime. Termux and macOS run the non-root shared core; Windows currently uses its smaller native PowerShell bridge.
 - SSH targets require a system `ssh`; copy requires `scp`.
 - SSH passwords are not stored or prompted interactively.
 - A job recovered after its original parent runtime died can know that it later exited, but the historical wait status may be unavailable; recovered exit code can therefore be `-1`.
-- Desktop capability depends on the host session and an available adapter.
+- Desktop capability depends on the host session, OS permissions, and an available adapter. macOS additionally enforces TCC Screen Recording/Accessibility/Automation permissions.
 - Full Power is broad host authority; expose the HTTP endpoint only through a trusted local/tunnel path and use policy/token controls where appropriate.
 
 ## Philosophy

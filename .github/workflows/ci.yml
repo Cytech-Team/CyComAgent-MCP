@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Parse POSIX bootstrap scripts
-        run: sh -n scripts/bootstrap.sh scripts/bootstrap-termux.sh
+        run: sh -n scripts/bootstrap.sh scripts/bootstrap-termux.sh scripts/install-launchd.sh
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
@@ -44,6 +44,20 @@ jobs:
         with:
           name: cycomagent-termux-arm64
           path: dist/cycomagent-termux-arm64
+
+  macos-core:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - name: Parse macOS installer
+        run: sh -n scripts/bootstrap.sh scripts/install-launchd.sh
+      - run: go test ./...
+      - run: go vet ./...
+      - run: make build-macos
+      - run: file dist/cycomagent-macos-arm64 dist/cycomagent-macos-amd64
 
   windows-bridge:
     runs-on: windows-latest

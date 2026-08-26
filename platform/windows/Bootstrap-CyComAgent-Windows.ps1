@@ -4,7 +4,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$Version = '0.4.4-multiplatform-dev'
+$Version = '0.4.5-macos-dev'
 $Tag = "v$Version"
 $ReleaseBase = "https://github.com/Cytech-Team/CyComAgent-MCP/releases/download/$Tag"
 $Archive = "CyComAgent-MCP-v$Version-windows.zip"

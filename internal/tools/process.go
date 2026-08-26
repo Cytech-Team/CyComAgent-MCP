@@ -103,7 +103,13 @@ func processExec(ctx context.Context, raw json.RawMessage, root broker.Client) (
 		shell = platform.DefaultShell()
 	}
 	if in.Privileged && !platform.SupportsLocalPrivilege() {
-		return nil, fmt.Errorf("Android device-root escalation is not supported on Termux and is not planned; ordinary user-space commands (including sudo inside a non-root container/proot when available) remain allowed")
+		if platform.IsTermux() {
+			return nil, fmt.Errorf("Android device-root escalation is not supported on Termux and is not planned; ordinary user-space commands (including sudo inside a non-root container/proot when available) remain allowed")
+		}
+		if platform.IsDarwin() {
+			return nil, fmt.Errorf("local privileged execution is not supported by the experimental macOS runtime; use ordinary user-space commands or a remote SSH target")
+		}
+		return nil, fmt.Errorf("local privileged execution is not supported on this platform")
 	}
 	if in.Privileged {
 		res, err := root.Exec(ctx, broker.ExecRequest{Command: in.Command, Stdin: in.Stdin, Cwd: in.Cwd, Env: in.Env, Shell: shell, TimeoutSeconds: int(timeout / time.Second), MaxOutputBytes: max})

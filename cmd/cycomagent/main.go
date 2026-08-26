@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	goruntime "runtime"
 	"syscall"
 	"time"
 
@@ -16,14 +17,14 @@ import (
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/runtime"
 )
 
-var version = "0.4.0-termux-dev"
+var version = "0.4.5-macos-dev"
 
 func main() {
 	mode := flag.String("mode", envOr("CYCOM_MODE", "http"), "transport: http or stdio")
 	addr := flag.String("addr", envOr("CYCOM_ADDR", "127.0.0.1:7331"), "HTTP listen address")
 	stateDir := flag.String("state-dir", envOr("CYCOM_STATE_DIR", defaultStateDir()), "persistent state directory")
 	pluginDir := flag.String("plugin-dir", envOr("CYCOM_PLUGIN_DIR", ""), "external tool manifest directory")
-	rootSocket := flag.String("root-socket", envOr("CYCOM_ROOT_SOCKET", platform.DefaultRootSocket()), "Linux privilege broker unix socket; ignored on Android/Termux")
+	rootSocket := flag.String("root-socket", envOr("CYCOM_ROOT_SOCKET", platform.DefaultRootSocket()), "optional local privilege-broker unix socket; currently Linux-only")
 	token := flag.String("token", envOr("CYCOM_TOKEN", ""), "optional bearer/X-CyCom-Token for HTTP MCP")
 	strict := flag.Bool("strict-mcp", runtime.EnvBool("CYCOM_STRICT_MCP", false), "strictly validate modern MCP routing/version headers")
 	allowRemote := flag.Bool("allow-unauthenticated-remote", runtime.EnvBool("CYCOM_ALLOW_UNAUTHENTICATED_REMOTE", false), "allow non-loopback HTTP bind without CYCOM_TOKEN")
@@ -42,6 +43,8 @@ func main() {
 	instructions := ""
 	if platform.IsTermux() {
 		instructions = "CyComAgent is running in Termux mobile_assistant mode. Prefer assistant_* semantic Android tools for normal phone actions and conversation-like behavior; use android_api_* only for capabilities without a semantic wrapper, and use process_exec/fs_*/target_* for advanced computer-style work. Never attempt Android device root, su, Magisk, bootloader/root escalation, or a local Android root broker. Remote SSH sudo and sudo inside non-root proot/container environments remain valid where explicitly requested and permitted. Sensitive phone capabilities are policy- and Android-permission-gated."
+	} else if goruntime.GOOS == "darwin" {
+		instructions = "CyComAgent is running in experimental macOS mode. The portable Go core is available; launchd, screencapture and AppleScript/cliclick adapters may require normal macOS TCC permissions. Local privileged execution is intentionally unavailable until a native macOS privilege broker exists."
 	}
 	rt, err := runtime.New(runtime.Config{Version: version, StateDir: *stateDir, PluginDir: *pluginDir, RootSocket: *rootSocket, StrictMCP: *strict, Instructions: instructions})
 	if err != nil {

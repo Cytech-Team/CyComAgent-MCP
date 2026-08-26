@@ -37,11 +37,11 @@ func registerSystem(r *registry.Registry, deps systemDeps) {
 		return systemInfo(deps), nil
 	}}))
 	must(r.Add(registry.Tool{Name: "system_env", Description: "Read selected environment variables by name. Variables must be requested explicitly; the full environment is never dumped implicitly.", InputSchema: registry.ObjectSchema(map[string]any{"names": registry.StringArray("environment variable names")}, []string{"names"}), Source: "core", Annotations: map[string]any{"readOnlyHint": true}, Handler: systemEnv}))
-	must(r.Add(registry.Tool{Name: "service_control", Description: "Inspect or control the host service manager (systemd on Linux, runit/termux-services on Termux).", InputSchema: registry.ObjectSchema(map[string]any{
+	must(r.Add(registry.Tool{Name: "service_control", Description: "Inspect or control the host service manager (systemd on Linux, runit/termux-services on Termux, launchd on macOS).", InputSchema: registry.ObjectSchema(map[string]any{
 		"name":       registry.String("service/unit name"),
 		"action":     map[string]any{"type": "string", "enum": []string{"status", "start", "stop", "restart", "reload", "enable", "disable", "is-active", "is-enabled"}},
-		"user":       registry.Boolean("operate on the user service manager (systemd only)"),
-		"privileged": registry.Boolean("execute systemd control through the root broker; unsupported for Termux runit"),
+		"user":       registry.Boolean("operate on the user service manager (systemd; macOS launchd adapter is user-domain only)"),
+		"privileged": registry.Boolean("execute through the local privilege broker where supported; macOS and Termux adapters are non-privileged"),
 	}, []string{"name", "action"}), Source: "core", Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
 		return serviceControl(ctx, raw, deps.Broker)
 	}}))
@@ -89,7 +89,21 @@ func systemInfo(deps systemDeps) map[string]any {
 	if data, err := os.ReadFile("/proc/uptime"); err == nil {
 		out["proc_uptime"] = strings.TrimSpace(string(data))
 	}
-	bins := []string{"sh", "bash", "fish", "git", "systemctl", "sv", "sv-enable", "sv-disable", "docker", "podman", "python3", "node", "java", "cargo", "go", "ffmpeg", "curl", "wget", "ssh", "rsync", "nvidia-smi", "termux-battery-status", "termux-clipboard-get", "termux-notification", "termux-camera-photo"}
+	if runtime.GOOS == "darwin" {
+		out["runtime_profile"] = "macos_experimental"
+		out["macos_runtime_tested"] = false
+		out["local_privilege_support"] = "not_supported"
+		if b, err := exec.Command("sw_vers", "-productVersion").Output(); err == nil {
+			out["macos_version"] = strings.TrimSpace(string(b))
+		}
+		if b, err := exec.Command("sw_vers", "-buildVersion").Output(); err == nil {
+			out["macos_build"] = strings.TrimSpace(string(b))
+		}
+		if b, err := exec.Command("sysctl", "-n", "kern.boottime").Output(); err == nil {
+			out["kern_boottime"] = strings.TrimSpace(string(b))
+		}
+	}
+	bins := []string{"sh", "bash", "fish", "git", "systemctl", "launchctl", "screencapture", "osascript", "cliclick", "sv", "sv-enable", "sv-disable", "docker", "podman", "python3", "node", "java", "cargo", "go", "ffmpeg", "curl", "wget", "ssh", "scp", "rsync", "nvidia-smi", "termux-battery-status", "termux-clipboard-get", "termux-notification", "termux-camera-photo"}
 	found := map[string]string{}
 	for _, b := range bins {
 		if p, err := exec.LookPath(b); err == nil {
@@ -135,6 +149,9 @@ func serviceControl(ctx context.Context, raw json.RawMessage, root broker.Client
 	if platform.IsTermux() {
 		return termuxServiceControl(ctx, in.Name, in.Action, in.Privileged)
 	}
+	if runtime.GOOS == "darwin" {
+		return darwinServiceControl(ctx, in.Name, in.Action, in.Privileged)
+	}
 	args := []string{}
 	if in.User {
 		args = append(args, "--user")
@@ -149,6 +166,44 @@ func serviceControl(ctx context.Context, raw json.RawMessage, root broker.Client
 		return res, nil
 	}
 	return runServiceCommand(ctx, "systemd", in.Name, in.Action, "systemctl", args...)
+}
+
+func darwinServiceControl(ctx context.Context, name, action string, privileged bool) (any, error) {
+	if privileged {
+		return nil, fmt.Errorf("privileged service_control is not supported by the experimental macOS launchd adapter")
+	}
+	if _, err := exec.LookPath("launchctl"); err != nil {
+		return nil, fmt.Errorf("macOS launchd adapter requires launchctl")
+	}
+	domain := fmt.Sprintf("gui/%d", os.Getuid())
+	target := domain + "/" + name
+	home, _ := os.UserHomeDir()
+	plist := filepath.Join(home, "Library", "LaunchAgents", name+".plist")
+	switch action {
+	case "status", "is-active":
+		return runServiceCommand(ctx, "launchd-user", name, action, "launchctl", "print", target)
+	case "start":
+		if _, err := os.Stat(plist); err != nil {
+			return nil, fmt.Errorf("launchd plist not found for %s: %s", name, plist)
+		}
+		return runServiceCommand(ctx, "launchd-user", name, action, "launchctl", "bootstrap", domain, plist)
+	case "stop":
+		return runServiceCommand(ctx, "launchd-user", name, action, "launchctl", "bootout", target)
+	case "restart", "reload":
+		if _, err := os.Stat(plist); err != nil {
+			return nil, fmt.Errorf("launchd plist not found for %s: %s", name, plist)
+		}
+		_, _ = runServiceCommand(ctx, "launchd-user", name, "stop", "launchctl", "bootout", target)
+		return runServiceCommand(ctx, "launchd-user", name, action, "launchctl", "bootstrap", domain, plist)
+	case "enable":
+		return runServiceCommand(ctx, "launchd-user", name, action, "launchctl", "enable", target)
+	case "disable":
+		return runServiceCommand(ctx, "launchd-user", name, action, "launchctl", "disable", target)
+	case "is-enabled":
+		return runServiceCommand(ctx, "launchd-user", name, action, "launchctl", "print-disabled", domain)
+	default:
+		return nil, fmt.Errorf("unsupported macOS service action %q", action)
+	}
 }
 
 func termuxServiceControl(ctx context.Context, name, action string, privileged bool) (any, error) {
@@ -318,7 +373,7 @@ func capabilities(r *registry.Registry, deps systemDeps) map[string]any {
 	for _, t := range tools {
 		names = append(names, t.Name)
 	}
-	bins := []string{"git", "systemctl", "sv", "sv-enable", "sv-disable", "docker", "podman", "python3", "node", "java", "cargo", "go", "ssh", "scp", "rsync", "nvidia-smi", "grim", "spectacle", "xdotool", "ydotool", "wtype", "termux-battery-status", "termux-clipboard-get", "termux-notification", "termux-camera-photo"}
+	bins := []string{"git", "systemctl", "launchctl", "sv", "sv-enable", "sv-disable", "docker", "podman", "python3", "node", "java", "cargo", "go", "ssh", "scp", "rsync", "nvidia-smi", "grim", "spectacle", "screencapture", "osascript", "cliclick", "xdotool", "ydotool", "wtype", "termux-battery-status", "termux-clipboard-get", "termux-notification", "termux-camera-photo"}
 	found := map[string]bool{}
 	for _, b := range bins {
 		_, err := exec.LookPath(b)
@@ -333,6 +388,8 @@ func capabilities(r *registry.Registry, deps systemDeps) map[string]any {
 	serviceAdapter := map[string]any{"capability": "service.manage", "adapter": "systemd", "score": score(found["systemctl"], 100), "available": found["systemctl"]}
 	if platform.IsTermux() {
 		serviceAdapter = map[string]any{"capability": "service.manage", "adapter": "termux-runit", "score": score(found["sv"], 100), "available": found["sv"]}
+	} else if runtime.GOOS == "darwin" {
+		serviceAdapter = map[string]any{"capability": "service.manage", "adapter": "launchd-user", "score": score(found["launchctl"], 100), "available": found["launchctl"]}
 	}
 	adapters := []map[string]any{
 		{"capability": "local.exec", "adapter": "shell", "score": 100, "available": true},
@@ -344,6 +401,9 @@ func capabilities(r *registry.Registry, deps systemDeps) map[string]any {
 		{"capability": "container.manage", "adapter": "podman", "score": score(found["podman"], 95), "available": found["podman"]},
 		{"capability": "desktop.capture", "adapter": "grim", "score": score(found["grim"], 100), "available": found["grim"]},
 		{"capability": "desktop.capture", "adapter": "spectacle", "score": score(found["spectacle"], 95), "available": found["spectacle"]},
+		{"capability": "desktop.capture", "adapter": "screencapture", "score": score(runtime.GOOS == "darwin" && found["screencapture"], 100), "available": runtime.GOOS == "darwin" && found["screencapture"]},
+		{"capability": "desktop.input", "adapter": "osascript", "score": score(runtime.GOOS == "darwin" && found["osascript"], 90), "available": runtime.GOOS == "darwin" && found["osascript"]},
+		{"capability": "desktop.input", "adapter": "cliclick", "score": score(runtime.GOOS == "darwin" && found["cliclick"], 95), "available": runtime.GOOS == "darwin" && found["cliclick"]},
 		{"capability": "desktop.input", "adapter": "ydotool", "score": score(found["ydotool"], 100), "available": found["ydotool"]},
 		{"capability": "desktop.input", "adapter": "wtype", "score": score(found["wtype"], 90), "available": found["wtype"]},
 		{"capability": "desktop.input", "adapter": "xdotool", "score": score(found["xdotool"], 80), "available": found["xdotool"]},

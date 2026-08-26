@@ -45,14 +45,19 @@ func DefaultShell() string {
 	return "sh"
 }
 
-// SupportsLocalPrivilege reports whether CyComAgent supports its local privilege broker on this host.
-// Android/Termux is intentionally non-root only. Rooted Android is not supported and is not planned.
-func SupportsLocalPrivilege() bool {
-	return runtime.GOOS != "android" && !IsTermux()
+// IsDarwin reports whether the runtime is macOS.
+func IsDarwin() bool {
+	return runtime.GOOS == "darwin"
 }
 
-// DefaultRootSocket returns the Linux broker path on supported hosts. Android/Termux
-// intentionally returns an empty path so no local root broker can be configured by default.
+// SupportsLocalPrivilege reports whether CyComAgent supports its local privilege broker on this host.
+// The broker is currently Linux-only. Android/Termux and macOS run without the local root broker.
+func SupportsLocalPrivilege() bool {
+	return runtime.GOOS == "linux" && !IsTermux()
+}
+
+// DefaultRootSocket returns the Linux broker path on supported hosts. Non-Linux
+// platforms intentionally return an empty path until they have a native privilege adapter.
 func DefaultRootSocket() string {
 	if !SupportsLocalPrivilege() {
 		return ""
