@@ -1,0 +1,7 @@
+[Unit]
+Description=CyComAgent-MCP recovery probe for %i
+After=cycomagent@%i.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/cycomagent/watchdog.sh %i

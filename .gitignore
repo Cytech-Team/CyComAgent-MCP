@@ -1,0 +1,32 @@
+# Build output
+/dist/
+/.release/
+/.release-termux/
+/cycomagent
+/cycomagent-root
+
+# Runtime state / local configuration
+/.cycomagent/
+/.state/
+policy.json
+targets.json
+plugins.d/
+*.log
+.coverage
+
+# Secrets / credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+control-plane-api-key
+tunnel-id
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

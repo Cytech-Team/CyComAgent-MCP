@@ -1,0 +1,7 @@
+{
+  "mode": "full",
+  "allow_privileged": true,
+  "allow_remote_targets": true,
+  "allow_external_plugins": true,
+  "max_exec_timeout_seconds": 3600
+}

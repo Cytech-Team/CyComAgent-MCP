@@ -1,0 +1,34 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=CyComAgent-MCP AI computer runtime for %i
+After=local-fs.target cycomagent-root@%i.service
+Wants=cycomagent-root@%i.service
+Before=cycomagent-tunnel@%i.service
+
+[Service]
+Type=simple
+User=%i
+Environment=CYCOM_MODE=http
+Environment=CYCOM_ADDR=127.0.0.1:7331
+Environment=CYCOM_STATE_DIR=/var/lib/cycomagent-%i
+Environment=CYCOM_PLUGIN_DIR=/var/lib/cycomagent-%i/plugins.d
+Environment=CYCOM_ROOT_SOCKET=/run/cycomagent-%i/root.sock
+Environment=CYCOM_STRICT_MCP=false
+EnvironmentFile=-/etc/cycomagent/%i.env
+ExecStart=/usr/local/bin/cycomagent
+Restart=always
+RestartSec=1
+TimeoutStartSec=20
+TimeoutStopSec=10
+KillMode=mixed
+
+# Runtime needs broad access to the configured user's own machine by design.
+# It is intentionally not sandboxed with ProtectHome/ProtectSystem.
+NoNewPrivileges=true
+PrivateTmp=false
+
+StateDirectory=cycomagent-%i
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+{
+  "mode": "readonly",
+  "allow_privileged": false,
+  "allow_remote_targets": false,
+  "allow_external_plugins": false,
+  "max_exec_timeout_seconds": 120
+}

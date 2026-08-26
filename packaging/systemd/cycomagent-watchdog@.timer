@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic CyComAgent-MCP recovery probe for %i
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Persistent=true
+Unit=cycomagent-watchdog@%i.service
+
+[Install]
+WantedBy=timers.target

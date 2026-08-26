@@ -1,0 +1,25 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=CyComAgent-MCP privilege broker for %i
+After=local-fs.target
+Before=cycomagent@%i.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+RuntimeDirectory=cycomagent-%i
+RuntimeDirectoryMode=0755
+ExecStart=/bin/sh -c 'exec /usr/local/bin/cycomagent-root --allow-uid="$(id -u "%i")" --allow-exe=/usr/local/bin/cycomagent --socket=/run/cycomagent-%i/root.sock --socket-mode=0600'
+Restart=always
+RestartSec=1
+NoNewPrivileges=false
+PrivateTmp=false
+ProtectHome=false
+ProtectSystem=false
+
+# This broker intentionally has host root authority. Access is constrained by
+# the Unix-socket owner plus SO_PEERCRED UID/PID and executable-path validation in the broker itself.
+
+[Install]
+WantedBy=multi-user.target

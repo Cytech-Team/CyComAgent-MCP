@@ -1,0 +1,22 @@
+name: Capability request
+description: Propose a generic capability or adapter without hard-coding a workflow.
+title: "[Capability]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What generic capability is missing?
+      description: Describe the primitive/capability, not a one-off automation workflow.
+    validations:
+      required: true
+  - type: textarea
+    id: composition
+    attributes:
+      label: How could AI compose it with existing tools?
+    validations:
+      required: true
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Suggested adapters or implementation notes

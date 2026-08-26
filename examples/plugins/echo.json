@@ -1,0 +1,15 @@
+{
+  "name": "example_echo",
+  "title": "Example external tool",
+  "description": "Example plugin that passes JSON to an executable over stdin.",
+  "command": "/bin/cat",
+  "timeout_seconds": 5,
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "message": {"type": "string"}
+    },
+    "required": ["message"],
+    "additionalProperties": false
+  }
+}

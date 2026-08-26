@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a reproducible CyComAgent-MCP runtime, tool, recovery, or compatibility problem.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Please remove secrets, API keys, private hostnames, and sensitive file contents before posting logs."
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 0.4.0-termux-dev
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / architecture
+      placeholder: Ubuntu 26.04 x86_64 / Termux Android arm64
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      render: shell

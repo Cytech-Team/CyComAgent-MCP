@@ -1,0 +1,21 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=OpenAI tunnel for CyComAgent-MCP user %i
+After=network-online.target cycomagent@%i.service
+Wants=network-online.target
+Wants=cycomagent@%i.service
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=%h
+Environment=MCP_SERVER_URL=http://127.0.0.1:7331/mcp
+Environment=HEALTH_LISTEN_ADDR=127.0.0.1:7332
+EnvironmentFile=/etc/cycomagent/%i-tunnel.env
+ExecStart=/usr/local/bin/tunnel-client run --log.level=info --log.format=json
+Restart=always
+RestartSec=2
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

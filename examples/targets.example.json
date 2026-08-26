@@ -1,0 +1,12 @@
+[
+  {
+    "name": "home",
+    "transport": "ssh",
+    "host": "namkrub-home-server",
+    "port": 22,
+    "user": "namkrub-home-server",
+    "identity_file": "/home/user/.ssh/id_ed25519",
+    "tags": ["linux", "home"],
+    "enabled": true
+  }
+]
