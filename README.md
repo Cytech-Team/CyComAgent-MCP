@@ -4,7 +4,7 @@
 
 CyComAgent-MCP is an AI-native computer runtime that exposes a real machine — and optional remote machines — as a compact set of composable MCP primitives. The model supplies the reasoning; CyComAgent supplies filesystem, process, persistent job, service, network, desktop, durable state, multi-machine target, policy, audit, plugin, and privileged-execution capabilities.
 
-`v0.4.3-multiplatform-dev` brings Linux, Android/Termux, and the Windows-native bridge into one public source tree.
+`v0.4.4-multiplatform-dev` adds one-command curl installers for Linux, Android/Termux, and Windows while keeping all three in one public source tree.
 
 ## What “Full Power” means
 
@@ -196,6 +196,22 @@ This keeps application-specific capabilities outside the generic core.
 - Android / Termux arm64: development support as a **`mobile_assistant`** runtime (non-root core + semantic Android assistant tools + runit service adapter). Android device root / `su` is **not supported and not planned**. `sudo` on remote SSH targets or inside a non-root userspace/container such as proot remains allowed where that environment provides it.
 - Windows 10/11: development support through the bundled Windows-native PowerShell bridge under `platform/windows` (6 native tools, loopback-only MCP, token auth, optional SYSTEM startup task). This bridge is intentionally smaller than the Linux core and is not yet feature-parity.
 - macOS: not supported.
+
+## One-command install
+
+Linux amd64 (systemd) and Android/Termux ARM64 use the same command; the installer detects the platform automatically:
+
+```sh
+curl -fsSL https://cdn.cytechteam.site/install/cycomagent | sh
+```
+
+Windows 10/11 uses the same curl-based flow but pipes into Windows PowerShell because Windows does not ship `sh` by default:
+
+```powershell
+curl.exe -fsSL https://cdn.cytechteam.site/install/cycomagent.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command -
+```
+
+Each bootstrap downloads an immutable GitHub Release asset and validates its published SHA-256 checksum before installation. Windows may show a UAC prompt because the bridge is installed as a SYSTEM startup task. macOS is not supported yet.
 
 ## Build
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.4-multiplatform-dev
+
+- Added shared curl bootstrap installation for Linux amd64 and Android/Termux ARM64.
+- Added curl + PowerShell bootstrap installation for Windows 10/11.
+- Added checksum verification against immutable GitHub Release assets on every supported platform.
+- Added Windows safe reinstall/update handling and reproducible Windows release packaging.
+
 ## 0.4.3-multiplatform-dev
 
 - Added the Windows-native PowerShell MCP bridge to the main repository.

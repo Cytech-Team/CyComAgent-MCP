@@ -25,6 +25,12 @@ Copy-Item -LiteralPath $source -Destination $dest -Force
 $token = Join-Path $InstallDir 'bridge.token'
 $log = Join-Path $InstallDir 'bridge.log'
 $taskName = 'CyComAgent Windows Bridge'
+$existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($null -ne $existingTask) {
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 300
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+}
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -BindAddress 127.0.0.1 -Port {1} -TokenFile "{2}" -LogFile "{3}"' -f $dest,$Port,$token,$log
 
