@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -264,7 +265,8 @@ func desktopEnvironment() []string {
 	wanted := map[string]bool{
 		"DISPLAY": true, "WAYLAND_DISPLAY": true, "XDG_RUNTIME_DIR": true,
 		"DBUS_SESSION_BUS_ADDRESS": true, "XAUTHORITY": true,
-		"XDG_CURRENT_DESKTOP": true, "KDE_FULL_SESSION": true,
+		"XDG_CURRENT_DESKTOP": true, "XDG_SESSION_TYPE": true,
+		"XDG_SESSION_DESKTOP": true, "DESKTOP_SESSION": true, "KDE_FULL_SESSION": true,
 	}
 	// If a useful desktop environment is already inherited, keep it.
 	if envMap["WAYLAND_DISPLAY"] == "" && envMap["DISPLAY"] == "" {
@@ -303,9 +305,86 @@ func desktopEnvironment() []string {
 			}
 		}
 	}
+	// System services often start before the graphical session and may be
+	// unable to read another process' /proc/<pid>/environ on hardened systems.
+	// Fill deterministic per-user session paths when they are discoverable.
+	uid := os.Getuid()
+	runtimeDir := fmt.Sprintf("/run/user/%d", uid)
+	if envMap["XDG_RUNTIME_DIR"] == "" {
+		if st, err := os.Stat(runtimeDir); err == nil && st.IsDir() {
+			envMap["XDG_RUNTIME_DIR"] = runtimeDir
+		}
+	}
+	if envMap["DBUS_SESSION_BUS_ADDRESS"] == "" {
+		if _, err := os.Stat(filepath.Join(runtimeDir, "bus")); err == nil {
+			envMap["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=" + filepath.Join(runtimeDir, "bus")
+		}
+	}
+	if envMap["WAYLAND_DISPLAY"] == "" {
+		if matches, _ := filepath.Glob(filepath.Join(runtimeDir, "wayland-*")); len(matches) > 0 {
+			sort.Strings(matches)
+			for _, match := range matches {
+				if strings.HasSuffix(match, ".lock") {
+					continue
+				}
+				if st, err := os.Stat(match); err == nil && st.Mode()&os.ModeSocket != 0 {
+					envMap["WAYLAND_DISPLAY"] = filepath.Base(match)
+					if envMap["XDG_SESSION_TYPE"] == "" {
+						envMap["XDG_SESSION_TYPE"] = "wayland"
+					}
+					break
+				}
+			}
+		}
+	}
+	if envMap["DISPLAY"] == "" {
+		if matches, _ := filepath.Glob("/tmp/.X11-unix/X*"); len(matches) > 0 {
+			sort.Strings(matches)
+			base := filepath.Base(matches[0])
+			if strings.HasPrefix(base, "X") {
+				envMap["DISPLAY"] = ":" + strings.TrimPrefix(base, "X")
+			}
+		}
+	}
+	if envMap["XAUTHORITY"] == "" {
+		if matches, _ := filepath.Glob(filepath.Join(runtimeDir, "xauth_*")); len(matches) > 0 {
+			sort.Strings(matches)
+			envMap["XAUTHORITY"] = matches[0]
+		}
+	}
+	if envMap["XDG_CURRENT_DESKTOP"] == "" {
+		if processNameExistsForUID(uid, "plasmashell") || processNameExistsForUID(uid, "kwin_wayland") {
+			envMap["XDG_CURRENT_DESKTOP"] = "KDE"
+			envMap["KDE_FULL_SESSION"] = "true"
+		}
+	}
 	out := make([]string, 0, len(envMap))
 	for k, v := range envMap {
 		out = append(out, k+"="+v)
 	}
+	sort.Strings(out)
 	return out
+}
+
+func processNameExistsForUID(uid int, wanted string) bool {
+	entries, _ := os.ReadDir("/proc")
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 1 {
+			continue
+		}
+		info, err := os.Stat(filepath.Join("/proc", entry.Name()))
+		if err != nil {
+			continue
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || int(stat.Uid) != uid {
+			continue
+		}
+		comm, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "comm"))
+		if err == nil && strings.TrimSpace(string(comm)) == wanted {
+			return true
+		}
+	}
+	return false
 }

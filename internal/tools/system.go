@@ -391,7 +391,9 @@ func capabilities(r *registry.Registry, deps systemDeps) map[string]any {
 	} else if runtime.GOOS == "darwin" {
 		serviceAdapter = map[string]any{"capability": "service.manage", "adapter": "launchd-user", "score": score(found["launchctl"], 100), "available": found["launchctl"]}
 	}
+	anyAppPath, anyAppAvailable := anyAppInstalledBackend()
 	adapters := []map[string]any{
+		{"capability": "desktop.semantic", "adapter": "codex-computer-use-linux", "score": score(anyAppAvailable, 110), "available": anyAppAvailable, "path": anyAppBackendBase(anyAppPath), "tools": anyAppToolPrefixCount(r)},
 		{"capability": "local.exec", "adapter": "shell", "score": 100, "available": true},
 		{"capability": "privileged.exec", "adapter": "root-broker", "score": score(platform.SupportsLocalPrivilege() && deps.Broker.Available(), 100), "available": platform.SupportsLocalPrivilege() && deps.Broker.Available()},
 		{"capability": "remote.exec", "adapter": "openssh", "score": score(found["ssh"], 95), "available": found["ssh"]},

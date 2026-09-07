@@ -4,7 +4,7 @@
 
 CyComAgent-MCP is an AI-native computer runtime that exposes a real machine — and optional remote machines — as a compact set of composable MCP primitives. The model supplies the reasoning; CyComAgent supplies filesystem, process, persistent job, service, network, desktop, durable state, multi-machine target, policy, audit, plugin, and privileged-execution capabilities.
 
-`v0.4.5-macos-dev` adds experimental macOS support to the shared Go core and the same curl-based release flow used by Linux and Termux, while Windows remains available through its native bridge.
+`v0.4.6-anyapp-dev` adds an optional Linux Any App bridge with native KDE Wayland window control, accessibility, screenshots, and targeted input. The helper runs independently of the ChatGPT application. Existing macOS, Termux, and Windows paths remain available. This is the source development version; the curl bootstrap continues to install the published `v0.4.5-macos-dev` release until new release assets are published.
 
 ## What “Full Power” means
 
@@ -84,6 +84,18 @@ Application state is explicit (`job_*`, `state_*`, `target_*`) rather than hidde
 `desktop_capture`, `desktop_input`
 
 Adapters are selected from available host tools such as `grim`, `spectacle`, `ydotool`, `wtype`, or `xdotool` rather than hard-coding a desktop environment.
+
+### Optional Linux Any App tools
+
+When a compatible `codex-computer-use-linux` helper is installed, CyComAgent
+registers its MCP tools under `anyapp_*` in addition to the generic tools above.
+Use `anyapp_get_app_state` first, then semantic or explicitly targeted actions.
+KDE Wayland uses the desktop portal for input/screenshots and KWin for window
+control; the patched helper also supports native move/resize without `xdotool`.
+No helper means no extra tools; the generic runtime remains available.
+
+See [Linux Any App setup](docs/anyapp-linux.md) for the standalone helper,
+permissions, pinned KWin patch, build commands, verification, and limitations.
 
 ### Durable explicit state — 4
 

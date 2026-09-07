@@ -31,6 +31,7 @@ func Register(r *registry.Registry, deps Dependencies) {
 	registerTermuxAPI(r, deps.Policy)
 	registerTermuxAssistant(r)
 	registerDesktop(r, deps.StateDir)
+	registerAnyApp(r)
 	registerState(r, deps.State)
 	registerTargets(r, deps.Targets, deps.Broker)
 	registerGovernance(r, deps.Audit, deps.Policy)

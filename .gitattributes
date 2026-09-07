@@ -1,0 +1,2 @@
+# Unified patch context prefixes empty source lines with a space.
+packaging/anyapp/*.patch -whitespace

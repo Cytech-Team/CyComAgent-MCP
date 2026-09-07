@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.6-anyapp-dev (source)
+
+- Added optional Linux `anyapp_*` tools backed by a persistent standalone MCP helper.
+- Preserved native image results, tool schemas, annotations, and structured results.
+- Preserved 64-bit KWin window IDs across JSON arguments and responses.
+- Added desktop-session discovery for services that start before graphical login, plus helper replacement/session-change detection.
+- Added standalone helper discovery before application-bundled helper locations.
+- Included the pinned native KWin move/resize patch, geometry verification, upstream license, and reproducible build instructions.
+- Added bridge regression tests and documented Wayland portal/AT-SPI requirements and limitations.
+- Kept the existing release bootstrap pinned to published assets; no new binary release is implied by this source update.
+
 ## 0.4.5-macos-dev
 
 - Added experimental macOS support to the shared Go core for Darwin arm64 and amd64.

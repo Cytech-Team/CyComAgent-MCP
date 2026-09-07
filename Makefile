@@ -1,5 +1,5 @@
 BINARY := cycomagent
-VERSION ?= 0.4.5-macos-dev
+VERSION ?= 0.4.6-anyapp-dev
 GO ?= go
 LDFLAGS := -s -w -X main.version=$(VERSION)
 STAGE := .release/CyComAgent-MCP

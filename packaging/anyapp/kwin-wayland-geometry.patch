@@ -1,0 +1,312 @@
+diff --git a/computer-use-linux/src/server.rs b/computer-use-linux/src/server.rs
+index b972f65065cc1f461c811a5b2753b59089aa42c0..9703329948aefc7b8631a5d086e372959a92dfe6 100644
+--- a/computer-use-linux/src/server.rs
++++ b/computer-use-linux/src/server.rs
+@@ -1898,7 +1898,7 @@ impl ComputerUseLinux {
+ 
+     #[tool(
+         name = "move_window",
+-        description = "Move a window to a new desktop position (frame top-left in desktop coordinates). Useful to recover windows that are partially off-screen. Works through the Codex GNOME Shell extension or a generic X11/EWMH window manager (wmctrl).",
++        description = "Move a window to a new desktop position (frame top-left in desktop coordinates). Useful to recover windows that are partially off-screen. Works natively through KWin/Plasma (including Wayland), the Codex GNOME Shell extension, or a generic X11/EWMH window manager (wmctrl).",
+         annotations(
+             read_only_hint = false,
+             destructive_hint = false,
+@@ -1920,7 +1920,7 @@ impl ComputerUseLinux {
+ 
+     #[tool(
+         name = "resize_window",
+-        description = "Resize a window to a new frame width/height in desktop pixels, unmaximizing it first if needed. Useful to fit a window fully on-screen. Works through the Codex GNOME Shell extension or a generic X11/EWMH window manager (wmctrl).",
++        description = "Resize a window to a new frame width/height in desktop pixels, unmaximizing it first if needed. Useful to fit a window fully on-screen. Works natively through KWin/Plasma (including Wayland), the Codex GNOME Shell extension, or a generic X11/EWMH window manager (wmctrl).",
+         annotations(
+             read_only_hint = false,
+             destructive_hint = false,
+@@ -1949,7 +1949,7 @@ impl ComputerUseLinux {
+     // can't be env!("CARGO_PKG_VERSION"); the MCP safety check (CI) fails the
+     // build if it drifts from the Cargo version.
+     version = "0.4.9-linux-alpha1",
+-    instructions = "Begin every turn that uses Computer Use by calling get_app_state. If diagnostics report disabled GNOME accessibility, call setup_accessibility before asking the user to retry. Use list_windows/focused_window before targeted keyboard input. If diagnostics report windowing.can_list_windows=false on GNOME, call setup_window_targeting to install the optional GNOME Shell extension backend, then ask the user to log out and back in if the setup report says a shell reload is required. This Linux backend can capture size-bounded screenshots through GNOME Shell, the Codex GNOME Shell extension, or XDG Desktop Portal, read AT-SPI trees with action/value metadata, invoke native AT-SPI actions, set AT-SPI values or editable text, list/focus compositor windows through registered Linux window backends when the session permits it, attach best-effort terminal tty/process metadata to terminal windows, send coordinate or element-targeted click/scroll/drag input through the Wayland remote desktop portal when available, and send layout-safe literal type_text through KDE clipboard integration on Plasma Wayland or through portal keysyms on other Wayland sessions before falling back to ydotool. Screenshot results include width/height for the returned image plus coordinate_width/coordinate_height and scale for desktop coordinate conversion; request more detail with max_width, max_height, max_bytes, format=jpeg, quality, or a smaller target/crop instead of relying on unbounded screenshots. Tools with readOnlyHint=false may mutate local desktop or application state; hosts should require approval for actions that can submit, delete, send, purchase, or overwrite data. For element-targeted actions, prefer element_index from the latest get_app_state result; click, perform_action, and set_value can also use semantic role/name/text/states selectors when the target is unique. type_text and press_key accept optional window_id, pid, app_id, wm_class, title, tty, terminal_pid, terminal_command, or terminal_cwd selectors and refuse targeted input if focus cannot be verified. After targeted keyboard input, results append focused-element feedback from AT-SPI (role, name, editable) and warn when no editable element holds focus — treat that warning as the input not landing. Screenshot, click, and input results warn when the target window or coordinate is partially or fully off-screen; use move_window/resize_window (GNOME Shell extension backend) to bring a window fully on-screen before retrying. scroll accepts the same window targeting and relative coordinates as click. get_app_state returns a compact readiness block by default; pass verbose=true for the full diagnostics dump. Electron apps expose no AT-SPI tree unless launched with --force-renderer-accessibility."
++    instructions = "Begin every turn that uses Computer Use by calling get_app_state. If diagnostics report disabled GNOME accessibility, call setup_accessibility before asking the user to retry. Use list_windows/focused_window before targeted keyboard input. If diagnostics report windowing.can_list_windows=false on GNOME, call setup_window_targeting to install the optional GNOME Shell extension backend, then ask the user to log out and back in if the setup report says a shell reload is required. This Linux backend can capture size-bounded screenshots through GNOME Shell, the Codex GNOME Shell extension, or XDG Desktop Portal, read AT-SPI trees with action/value metadata, invoke native AT-SPI actions, set AT-SPI values or editable text, list/focus compositor windows through registered Linux window backends when the session permits it, attach best-effort terminal tty/process metadata to terminal windows, send coordinate or element-targeted click/scroll/drag input through the Wayland remote desktop portal when available, and send layout-safe literal type_text through KDE clipboard integration on Plasma Wayland or through portal keysyms on other Wayland sessions before falling back to ydotool. Screenshot results include width/height for the returned image plus coordinate_width/coordinate_height and scale for desktop coordinate conversion; request more detail with max_width, max_height, max_bytes, format=jpeg, quality, or a smaller target/crop instead of relying on unbounded screenshots. Tools with readOnlyHint=false may mutate local desktop or application state; hosts should require approval for actions that can submit, delete, send, purchase, or overwrite data. For element-targeted actions, prefer element_index from the latest get_app_state result; click, perform_action, and set_value can also use semantic role/name/text/states selectors when the target is unique. type_text and press_key accept optional window_id, pid, app_id, wm_class, title, tty, terminal_pid, terminal_command, or terminal_cwd selectors and refuse targeted input if focus cannot be verified. After targeted keyboard input, results append focused-element feedback from AT-SPI (role, name, editable) and warn when no editable element holds focus — treat that warning as the input not landing. Screenshot, click, and input results warn when the target window or coordinate is partially or fully off-screen; use move_window/resize_window (KWin/Plasma or GNOME Shell extension backend) to bring a window fully on-screen before retrying. scroll accepts the same window targeting and relative coordinates as click. get_app_state returns a compact readiness block by default; pass verbose=true for the full diagnostics dump. Electron apps expose no AT-SPI tree unless launched with --force-renderer-accessibility."
+ )]
+ impl ServerHandler for ComputerUseLinux {}
+ 
+diff --git a/computer-use-linux/src/windowing/backends/kwin.rs b/computer-use-linux/src/windowing/backends/kwin.rs
+index 8d4b15bae16e5c962b28fa3df8c310d7ac306e90..e5c4740fefb24ecad444ae162be5c5109840bdfb 100644
+--- a/computer-use-linux/src/windowing/backends/kwin.rs
++++ b/computer-use-linux/src/windowing/backends/kwin.rs
+@@ -3,7 +3,7 @@ use crate::terminal::enrich_terminal_windows;
+ use crate::windowing::registry::BackendProbe;
+ use crate::windowing::types::{WindowBounds, WindowInfo};
+ use anyhow::{bail, Context, Result};
+-use serde::Deserialize;
++use serde::{Deserialize, Serialize};
+ use std::{
+     fs::{self, OpenOptions},
+     io::Write,
+@@ -61,6 +61,151 @@ pub async fn activate_window(window_id: u64) -> Result<()> {
+     call_kwin_activate_script(&uuid).await
+ }
+ 
++#[derive(Clone, Copy, Debug, Serialize)]
++#[serde(tag = "kind", rename_all = "snake_case")]
++enum KwinGeometryChange {
++    Move { x: i32, y: i32 },
++    Resize { width: i32, height: i32 },
++}
++
++impl KwinGeometryChange {
++    fn validate(self) -> Result<()> {
++        if let Self::Resize { width, height } = self {
++            if width <= 0 || height <= 0 {
++                bail!("KWin window width and height must be positive");
++            }
++        }
++        Ok(())
++    }
++
++    fn matches(self, bounds: &WindowBounds) -> bool {
++        match self {
++            Self::Move { x, y } => bounds.x == Some(x) && bounds.y == Some(y),
++            Self::Resize { width, height } => {
++                bounds.width == width as u32 && bounds.height == height as u32
++            }
++        }
++    }
++}
++
++pub async fn move_window(window_id: u64, x: i32, y: i32) -> Result<String> {
++    change_window_geometry(window_id, KwinGeometryChange::Move { x, y }).await
++}
++
++pub async fn resize_window(window_id: u64, width: i32, height: i32) -> Result<String> {
++    change_window_geometry(window_id, KwinGeometryChange::Resize { width, height }).await
++}
++
++async fn change_window_geometry(window_id: u64, change: KwinGeometryChange) -> Result<String> {
++    change.validate()?;
++    let uuid = kwin_uuid_for_window_id(window_id).await?.with_context(|| {
++        format!("No KWin window matched window_id {window_id} during geometry change")
++    })?;
++    let json = call_kwin_script(move |service_name, object_path, plugin_name| {
++        let script =
++            kwin_geometry_script_source(service_name, object_path, plugin_name, &uuid, change)?;
++        write_kwin_script_file(plugin_name, &script)
++    })
++    .await?;
++    let result: KwinScriptResult =
++        serde_json::from_str(&json).context("failed to parse KWin geometry script output")?;
++    if !result.ok {
++        bail!(
++            "KWin geometry change refused: {}",
++            result.error.unwrap_or_else(|| "unknown error".into())
++        );
++    }
++    // Wayland clients acknowledge resize requests asynchronously. A successful
++    // script callback alone is not evidence that the geometry reached the app.
++    let mut last_bounds = None;
++    for _ in 0..12 {
++        let window = list_windows()
++            .await?
++            .into_iter()
++            .find(|window| window.window_id == window_id)
++            .context("KWin target window disappeared during geometry verification")?;
++        if let Some(bounds) = window.bounds {
++            if change.matches(&bounds) {
++                return Ok(format!(
++                    "Window geometry changed through KWin and verified: {},{} {}x{}.",
++                    bounds.x.unwrap_or_default(),
++                    bounds.y.unwrap_or_default(),
++                    bounds.width,
++                    bounds.height
++                ));
++            }
++            last_bounds = Some(bounds);
++        }
++        sleep(Duration::from_millis(60)).await;
++    }
++    bail!("KWin did not reach requested geometry {change:?}; actual bounds: {last_bounds:?}. The application or window rules may constrain its geometry.")
++}
++
++fn kwin_geometry_script_source(
++    service_name: &str,
++    object_path: &str,
++    plugin_name: &str,
++    uuid: &str,
++    change: KwinGeometryChange,
++) -> Result<String> {
++    change.validate()?;
++    let uuid = normalize_kwin_uuid(uuid).context("KWin geometry change requires a uuid")?;
++    let service_name = serde_json::to_string(service_name)?;
++    let object_path = serde_json::to_string(object_path)?;
++    let interface = serde_json::to_string(KWIN_CALLBACK_INTERFACE)?;
++    let plugin_name = serde_json::to_string(plugin_name)?;
++    let uuid = serde_json::to_string(&uuid)?;
++    let change = serde_json::to_string(&change)?;
++    Ok(format!(
++        r#"(function() {{
++    var targetUuid = {uuid};
++    var change = {change};
++    function send(payload) {{
++        payload.backend = "kwin";
++        payload.pluginName = {plugin_name};
++        callDBus({service_name}, {object_path}, {interface}, "ReceiveResult", JSON.stringify(payload));
++    }}
++    function normalizeUuid(value) {{
++        if (value === null || value === undefined) return "";
++        return String(value).trim().toLowerCase().replace(/^\{{|\}}$/g, "");
++    }}
++    try {{
++        var windows = typeof workspace.windowList === "function" ? workspace.windowList()
++            : (typeof workspace.clientList === "function" ? workspace.clientList() : workspace.stackingOrder);
++        var target = null;
++        for (var i = 0; windows && i < windows.length; i++) {{
++            if ((normalizeUuid(windows[i].uuid) || normalizeUuid(windows[i].internalId)) === targetUuid) {{
++                target = windows[i];
++                break;
++            }}
++        }}
++        if (!target) throw new Error("window not found: " + targetUuid);
++        if (target.fullScreen) throw new Error("leave fullscreen before changing window geometry");
++        if (change.kind === "move" && target.moveable === false) throw new Error("window is not moveable");
++        if (change.kind === "resize" && target.resizeable === false) throw new Error("window is not resizeable");
++        if (typeof target.setMaximize === "function") target.setMaximize(false, false);
++        var current = target.moveResizeGeometry || target.frameGeometry;
++        if (!current || !(current.width > 0) || !(current.height > 0)) throw new Error("window has no usable frame geometry");
++        // KWin exposes QRectF as a Qt value wrapper: writing its fields may be
++        // ignored. Assign a fresh plain object to frameGeometry instead.
++        var rect = {{x: current.x, y: current.y, width: current.width, height: current.height}};
++        if (change.kind === "move") {{
++            rect.x = change.x;
++            rect.y = change.y;
++        }} else {{
++            rect.width = change.width;
++            rect.height = change.height;
++        }}
++        target.frameGeometry = rect;
++        send({{ok: true}});
++    }} catch (error) {{
++        send({{ok: false, error: String(error && error.message ? error.message : error)}});
++    }}
++}})();
++"#
++    ))
++}
++
+ async fn kwin_uuid_for_window_id(window_id: u64) -> Result<Option<String>> {
+     let json = call_kwin_window_script().await?;
+     let snapshot = parse_kwin_snapshot(&json)?;
+@@ -917,3 +1062,87 @@ fn gdbus_introspect_contains(
+         },
+     }
+ }
++
++#[cfg(test)]
++mod geometry_tests {
++    use super::*;
++
++    fn script(change: KwinGeometryChange) -> Result<String> {
++        kwin_geometry_script_source(":1.234", "/test", "test", "{ABC-123}", change)
++    }
++
++    #[test]
++    fn geometry_move_uses_native_kwin_and_supports_negative_coordinates() {
++        let js = script(KwinGeometryChange::Move { x: -1920, y: 120 }).unwrap();
++        assert!(js.contains(r#"var targetUuid = "abc-123";"#));
++        assert!(js.contains(r#""kind":"move","x":-1920,"y":120"#));
++        assert!(js.contains("workspace.windowList()"));
++        assert!(js.contains("workspace.clientList()"));
++        assert!(js.contains("target.frameGeometry = rect"));
++        assert!(!js.contains("xdotool"));
++    }
++
++    #[test]
++    fn geometry_resize_unmaximizes_and_checks_window_capabilities() {
++        let js = script(KwinGeometryChange::Resize {
++            width: 900,
++            height: 700,
++        })
++        .unwrap();
++        assert!(js.contains("target.setMaximize(false, false)"));
++        assert!(js.contains("target.resizeable === false"));
++        assert!(js.contains("if (target.fullScreen)"));
++        assert!(js.contains("ReceiveResult"));
++    }
++
++    #[test]
++    fn geometry_rejects_nonpositive_dimensions_before_dbus() {
++        for (width, height) in [(0, 10), (10, 0), (-1, 10), (10, -1)] {
++            assert!(script(KwinGeometryChange::Resize { width, height }).is_err());
++        }
++    }
++
++    #[test]
++    fn geometry_verification_checks_requested_axis_and_size() {
++        let b = WindowBounds {
++            x: Some(-1920),
++            y: Some(120),
++            width: 900,
++            height: 700,
++        };
++        assert!(KwinGeometryChange::Move { x: -1920, y: 120 }.matches(&b));
++        assert!(!KwinGeometryChange::Move { x: 0, y: 120 }.matches(&b));
++        assert!(KwinGeometryChange::Resize {
++            width: 900,
++            height: 700
++        }
++        .matches(&b));
++        assert!(!KwinGeometryChange::Resize {
++            width: 901,
++            height: 700
++        }
++        .matches(&b));
++    }
++
++    #[test]
++    fn geometry_clones_qt_rectangle_before_mutating_fields() {
++        let js = script(KwinGeometryChange::Move { x: 100, y: 200 }).unwrap();
++        assert!(js.contains(
++            "var rect = {x: current.x, y: current.y, width: current.width, height: current.height}"
++        ));
++        assert!(!js.contains("var rect = target.frameGeometry"));
++    }
++
++    #[test]
++    fn geometry_script_escapes_callback_names() {
++        let js = kwin_geometry_script_source(
++            "quote\"name",
++            "/test",
++            "test",
++            "abc",
++            KwinGeometryChange::Move { x: 0, y: 0 },
++        )
++        .unwrap();
++        assert!(js.contains(r#"quote\"name"#));
++    }
++}
+diff --git a/computer-use-linux/src/windowing/registry.rs b/computer-use-linux/src/windowing/registry.rs
+index bd057a90915fe79d2ee5018c48f66fa2382602a5..fbbe1d1ea224f23ddd233c5a19eb0164482d379b 100644
+--- a/computer-use-linux/src/windowing/registry.rs
++++ b/computer-use-linux/src/windowing/registry.rs
+@@ -253,9 +253,10 @@ pub async fn move_window(window: &WindowInfo, x: i32, y: i32) -> Result<String>
+         GNOME_SHELL_EXTENSION_BACKEND => {
+             gnome::move_extension_window(window.window_id, x, y).await
+         }
++        KWIN_BACKEND => kwin::move_window(window.window_id, x, y).await,
+         X11_BACKEND => x11::move_window(window.window_id, x, y).await,
+         backend => Err(anyhow!(
+-            "Window backend {backend} cannot move windows; move_window needs the Codex GNOME Shell extension or a generic X11/EWMH session."
++            "Window backend {backend} cannot move windows; move_window needs KWin/Plasma, the Codex GNOME Shell extension, or a generic X11/EWMH session."
+         )),
+     }
+ }
+@@ -265,9 +266,10 @@ pub async fn resize_window(window: &WindowInfo, width: i32, height: i32) -> Resu
+         GNOME_SHELL_EXTENSION_BACKEND => {
+             gnome::resize_extension_window(window.window_id, width, height).await
+         }
++        KWIN_BACKEND => kwin::resize_window(window.window_id, width, height).await,
+         X11_BACKEND => x11::resize_window(window.window_id, width, height).await,
+         backend => Err(anyhow!(
+-            "Window backend {backend} cannot resize windows; resize_window needs the Codex GNOME Shell extension or a generic X11/EWMH session."
++            "Window backend {backend} cannot resize windows; resize_window needs KWin/Plasma, the Codex GNOME Shell extension, or a generic X11/EWMH session."
+         )),
+     }
+ }
