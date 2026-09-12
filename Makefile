@@ -1,5 +1,5 @@
 BINARY := cycomagent
-VERSION ?= 0.4.6-anyapp-dev
+VERSION ?= 0.4.7-session-routing-dev
 GO ?= go
 LDFLAGS := -s -w -X main.version=$(VERSION)
 STAGE := .release/CyComAgent-MCP

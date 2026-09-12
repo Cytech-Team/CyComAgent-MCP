@@ -4,7 +4,7 @@
 
 CyComAgent-MCP is an AI-native computer runtime that exposes a real machine — and optional remote machines — as a compact set of composable MCP primitives. The model supplies the reasoning; CyComAgent supplies filesystem, process, persistent job, service, network, desktop, durable state, multi-machine target, policy, audit, plugin, and privileged-execution capabilities.
 
-`v0.4.6-anyapp-dev` adds an optional Linux Any App bridge with native KDE Wayland window control, accessibility, screenshots, and targeted input. The helper runs independently of the ChatGPT application. Existing macOS, Termux, and Windows paths remain available. This is the source development version; the curl bootstrap continues to install the published `v0.4.5-macos-dev` release until new release assets are published.
+`v0.4.7-session-routing-dev` adds Linux execution-context routing so GUI/session-sensitive commands can be born inside the active graphical login session instead of inheriting the CyComAgent system-service cgroup. The existing optional Linux Any App bridge, macOS, Termux, and Windows paths remain available. This is the source development version; the curl bootstrap continues to install the latest published release until new release assets are published.
 
 ## What “Full Power” means
 
@@ -65,19 +65,27 @@ Application state is explicit (`job_*`, `state_*`, `target_*`) rather than hidde
 
 `process_exec`, `process_spawn`, `process_inspect`, `process_signal`
 
-`process_exec` is the universal escape hatch and now accepts optional UTF-8 `stdin`. Commands run in a process group so timeout/cancellation kills the group instead of leaving descendants behind.
+`process_exec` is the universal escape hatch and accepts optional UTF-8 `stdin`. Commands run in a process group so timeout/cancellation kills the group instead of leaving descendants behind. On Linux it also accepts `execution_context=auto|service|user|desktop|system`: `desktop`/`user` route through the active login-session bridge, `service` stays in the CyComAgent service, and `system` requires `privileged=true` so the existing policy/root-broker boundary remains authoritative. `auto` is conservative and only routes a small set of known session-sensitive commands automatically; callers should explicitly request `desktop` for arbitrary GUI programs.
 
 ### Persistent jobs — 5
 
 `job_list`, `job_get`, `job_tail`, `job_signal`, `job_prune`
 
-`process_spawn` persists job metadata/logs on disk. If the runtime dies while the process continues, a new runtime instance rediscovers it.
+`process_spawn` persists job metadata/logs on disk. It accepts the same non-root execution contexts; desktop/user jobs are launched by the login-session bridge while the normal job store still owns their PID, log and signalling metadata. If the runtime dies while a process continues, a new runtime instance rediscovers the PID metadata.
 
 ### System / network / capability — 8
 
 `system_info`, `system_env`, `service_control`, `network_request`, `network_tcp`, `network_resolve`, `capabilities_list`, `plugins_reload`
 
-`capabilities_list` includes detected binaries, adapter availability/scores, policy, plugins, root broker, and targets.
+`capabilities_list` includes detected binaries, adapter availability/scores, policy, plugins, root broker, targets, and desktop-session-bridge status.
+
+### Linux desktop-session bridge
+
+The system runtime intentionally remains a boot-time service, but GUI programs, Polkit actions, desktop portals, notifications, keyrings and compositor/clipboard commands sometimes must be *born* in the active graphical login session. Copying `DISPLAY`, `WAYLAND_DISPLAY` or the session D-Bus address into a system service does not change its logind/systemd session cgroup, so it is not sufficient for those cases. The bridge refuses to start unless its own cgroup contains a real `session-N.scope`, preventing a copied environment from being mistaken for session identity.
+
+`cycomagent --session-bridge` is a small per-login-session Unix-socket helper. The system installer places an XDG autostart entry at `/etc/xdg/autostart/cycomagent-session-bridge.desktop`; desktop environments that honor XDG autostart *and preserve the login-session cgroup* can launch it automatically. If an environment delegates XDG autostart applications into `user@UID.service`, or on minimal compositors such as Labwc, start the same command from the compositor/session autostart file instead. The socket is private to the user and verifies the connecting UID/PID with `SO_PEERCRED`, then requires the peer executable to resolve to the same CyComAgent binary as the bridge.
+
+When the bridge is absent, service/headless execution keeps working normally. Explicit `desktop`/`user` execution returns a clear unavailable error instead of silently falling back into the wrong cgroup.
 
 ### Desktop — 2
 

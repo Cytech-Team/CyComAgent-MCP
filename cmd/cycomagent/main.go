@@ -15,9 +15,10 @@ import (
 
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/platform"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/runtime"
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/sessionbridge"
 )
 
-var version = "0.4.6-anyapp-dev"
+var version = "0.4.7-session-routing-dev"
 
 func main() {
 	mode := flag.String("mode", envOr("CYCOM_MODE", "http"), "transport: http or stdio")
@@ -28,10 +29,21 @@ func main() {
 	token := flag.String("token", envOr("CYCOM_TOKEN", ""), "optional bearer/X-CyCom-Token for HTTP MCP")
 	strict := flag.Bool("strict-mcp", runtime.EnvBool("CYCOM_STRICT_MCP", false), "strictly validate modern MCP routing/version headers")
 	allowRemote := flag.Bool("allow-unauthenticated-remote", runtime.EnvBool("CYCOM_ALLOW_UNAUTHENTICATED_REMOTE", false), "allow non-loopback HTTP bind without CYCOM_TOKEN")
+	sessionBridge := flag.Bool("session-bridge", false, "run the per-login-session execution bridge instead of the MCP runtime")
+	sessionSocket := flag.String("session-socket", envOr("CYCOM_SESSION_SOCKET", sessionbridge.DefaultSocketPath()), "desktop session bridge unix socket")
 	showVer := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *showVer {
 		fmt.Println(version)
+		return
+	}
+	if *sessionBridge {
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+		log.Printf("CyComAgent desktop session bridge listening on %s", *sessionSocket)
+		if err := sessionbridge.Run(ctx, *sessionSocket); err != nil {
+			log.Fatal(err)
+		}
 		return
 	}
 	if *pluginDir == "" {
@@ -46,7 +58,7 @@ func main() {
 	} else if goruntime.GOOS == "darwin" {
 		instructions = "CyComAgent is running in experimental macOS mode. The portable Go core is available; launchd, screencapture and AppleScript/cliclick adapters may require normal macOS TCC permissions. Local privileged execution is intentionally unavailable until a native macOS privilege broker exists."
 	} else if goruntime.GOOS == "linux" {
-		instructions = "CyComAgent is running in Linux computer_runtime mode. When anyapp_* tools are available, prefer anyapp_get_app_state plus semantic/window-targeted anyapp actions for GUI work; use desktop_capture/desktop_input as generic fallback tools. Use structured filesystem/process/service/network tools for non-GUI operations."
+		instructions = "CyComAgent is running in Linux computer_runtime mode. When anyapp_* tools are available, prefer anyapp_get_app_state plus semantic/window-targeted anyapp actions for GUI work; use desktop_capture/desktop_input as generic fallback tools. For process_exec/process_spawn, use execution_context=desktop when launching GUI apps or commands that need the active login session (Polkit, notifications, portals, keyrings, clipboard/compositor access); use service for daemon/headless work. Use structured filesystem/process/service/network tools for non-GUI operations."
 	}
 	rt, err := runtime.New(runtime.Config{Version: version, StateDir: *stateDir, PluginDir: *pluginDir, RootSocket: *rootSocket, StrictMCP: *strict, Instructions: instructions})
 	if err != nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/plugins"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/policy"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/registry"
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/sessionbridge"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/state"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/targets"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/tools"
@@ -93,7 +94,8 @@ func New(cfg Config) (*Runtime, error) {
 	reg.AddInterceptor(pe)
 	reg.AddInterceptor(al)
 	root := broker.Client{Socket: cfg.RootSocket}
-	tools.Register(reg, tools.Dependencies{Jobs: jm, Broker: root, Plugins: pm, State: st, Targets: tm, Audit: al, Policy: pe, StateDir: cfg.StateDir, Version: cfg.Version})
+	session := sessionbridge.NewClient("")
+	tools.Register(reg, tools.Dependencies{Jobs: jm, Broker: root, Plugins: pm, State: st, Targets: tm, Audit: al, Policy: pe, StateDir: cfg.StateDir, Version: cfg.Version, Session: session})
 	if pe.Snapshot().AllowExternalPlugins {
 		loaded, err := pm.LoadInto(reg)
 		if err != nil {

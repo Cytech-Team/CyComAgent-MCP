@@ -7,6 +7,7 @@ import (
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/plugins"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/policy"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/registry"
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/sessionbridge"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/state"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/targets"
 )
@@ -21,13 +22,14 @@ type Dependencies struct {
 	Policy   *policy.Engine
 	StateDir string
 	Version  string
+	Session  sessionbridge.Client
 }
 
 func Register(r *registry.Registry, deps Dependencies) {
 	registerFilesystem(r)
-	registerProcess(r, processDeps{Jobs: deps.Jobs, Broker: deps.Broker})
+	registerProcess(r, processDeps{Jobs: deps.Jobs, Broker: deps.Broker, Session: deps.Session})
 	registerJobs(r, deps.Jobs)
-	registerSystem(r, systemDeps{Broker: deps.Broker, Plugins: deps.Plugins, Policy: deps.Policy, Targets: deps.Targets, StateDir: deps.StateDir, Version: deps.Version})
+	registerSystem(r, systemDeps{Broker: deps.Broker, Plugins: deps.Plugins, Policy: deps.Policy, Targets: deps.Targets, StateDir: deps.StateDir, Version: deps.Version, Session: deps.Session})
 	registerTermuxAPI(r, deps.Policy)
 	registerTermuxAssistant(r)
 	registerDesktop(r, deps.StateDir)
