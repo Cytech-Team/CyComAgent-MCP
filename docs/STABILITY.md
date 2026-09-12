@@ -14,6 +14,8 @@ The engineering goal is stronger and measurable:
 | tunnel-client restart | CyComAgent remains alive |
 | CyComAgent crash | systemd restarts runtime |
 | root broker crash | systemd restarts broker; non-root tools remain usable |
+| desktop-session bridge absent/crashed | service/headless execution remains usable; explicit desktop/user execution fails clearly until the login-session bridge returns |
+| graphical logout/login | old bridge disappears with the login session; the next desktop autostart creates the new session bridge/socket |
 | temporary network outage | local runtime remains ready |
 | reboot | runtime/root/tunnel services start without GUI login |
 | long job + MCP reconnect | job remains addressable by ID |
@@ -43,7 +45,8 @@ A release intended for unattended deployment should pass:
 5. temporary network loss and return;
 6. concurrent file/process tool calls;
 7. command timeouts and large output caps;
-8. persistent job recovery.
+8. persistent job recovery;
+9. desktop-session bridge routing verifies child cgroup/session identity and preserves Polkit-visible active-session behavior.
 
 `scripts/chaos-test.sh` automates the process-kill subset.
 

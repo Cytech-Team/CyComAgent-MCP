@@ -8,7 +8,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 id "$USER_NAME" >/dev/null
-install -d -m 0755 /usr/local/lib/cycomagent /etc/cycomagent
+install -d -m 0755 /usr/local/lib/cycomagent /etc/cycomagent /etc/xdg/autostart
 install -m 0755 "$ROOT/dist/cycomagent" /usr/local/bin/cycomagent
 install -m 0755 "$ROOT/dist/cycomagent-root" /usr/local/bin/cycomagent-root
 install -m 0755 "$ROOT/scripts/watchdog.sh" /usr/local/lib/cycomagent/watchdog.sh
@@ -21,6 +21,7 @@ install -m 0644 "$ROOT/packaging/systemd/cycomagent-root@.service" /etc/systemd/
 install -m 0644 "$ROOT/packaging/systemd/cycomagent-tunnel@.service" /etc/systemd/system/
 install -m 0644 "$ROOT/packaging/systemd/cycomagent-watchdog@.service" /etc/systemd/system/
 install -m 0644 "$ROOT/packaging/systemd/cycomagent-watchdog@.timer" /etc/systemd/system/
+install -m 0644 "$ROOT/packaging/xdg/cycomagent-session-bridge.desktop" /etc/xdg/autostart/
 
 # Per-user runtime config is optional; create an empty private file if absent.
 if [[ ! -e "/etc/cycomagent/${USER_NAME}.env" ]]; then

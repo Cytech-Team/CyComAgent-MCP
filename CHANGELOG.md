@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.7-session-routing-dev (source)
+
+- Added Linux `execution_context=auto|service|user|desktop|system` routing to `process_exec` and `process_spawn`.
+- Added a desktop-session bridge that is launched by the graphical login session so GUI/Polkit/portal/keyring/clipboard children inherit the real login-session cgroup instead of `cycomagent@USER.service`; the socket checks same UID/PID credentials and the peer CyComAgent executable.
+- Kept `system` execution behind `privileged=true`, central policy, and the existing Linux root broker.
+- Added conservative auto-routing for known session-sensitive commands while leaving unknown/headless commands in the service context.
+- Added XDG autostart packaging for the login-session bridge plus bridge status/capability reporting.
+- Added durable external-job tracking for processes launched through the session bridge.
+- Added bridge, routing, timeout, job-persistence, and peer/session regression coverage.
+
 ## 0.4.6-anyapp-dev (source)
 
 - Added optional Linux `anyapp_*` tools backed by a persistent standalone MCP helper.

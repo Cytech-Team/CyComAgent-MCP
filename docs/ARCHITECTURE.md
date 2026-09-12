@@ -72,6 +72,25 @@ OS / OpenSSH / external binaries / privilege broker
 
 Policy and audit are registry-wide rather than being reimplemented by each tool.
 
+## Execution-context routing
+
+The Linux MCP runtime remains a system service for boot-time availability and recovery, but not every child process belongs in that service cgroup. Session-sensitive commands can be routed through a small bridge that is itself started by the graphical login session:
+
+```text
+cycomagent@USER.service
+        |
+        | Unix socket, same UID only
+        v
+cycomagent --session-bridge
+(user.slice/.../session-N.scope)
+        |
+        +--> GUI app / Polkit action / portal / notification / keyring
+```
+
+`process_exec` and `process_spawn` expose `execution_context` with `auto`, `service`, `user`, `desktop`, and `system`. The `desktop` and current Linux `user` paths use the login-session bridge; `service` preserves the existing runtime behavior; and `system` requires `privileged=true` and therefore still passes through policy plus the root broker. `auto` only recognizes a conservative set of well-known session-sensitive commands and otherwise stays in `service`.
+
+The bridge inherits the real graphical environment and, more importantly, the real logind/systemd session cgroup. It does not attempt to manufacture desktop identity by copying environment variables, and startup is rejected when the bridge's own cgroup has no `session-N.scope`. Its Unix socket is mode `0600`; the bridge verifies peer UID/PID with `SO_PEERCRED` and requires the peer executable to resolve to the same CyComAgent binary before accepting a request.
+
 ## Capability-driven adapters
 
 `capabilities_list` reports candidate adapters and availability/score. The model can choose among generic capabilities based on the actual machine rather than assuming one OS/toolchain.

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=CyComAgent Desktop Session Bridge
+Comment=Runs desktop-session commands outside the CyComAgent service cgroup
+Exec=/usr/local/bin/cycomagent --session-bridge
+TryExec=/usr/local/bin/cycomagent
+NoDisplay=true
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel

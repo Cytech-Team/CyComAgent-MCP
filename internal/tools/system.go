@@ -20,6 +20,7 @@ import (
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/plugins"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/policy"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/registry"
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/sessionbridge"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/targets"
 )
 
@@ -30,6 +31,7 @@ type systemDeps struct {
 	Targets  *targets.Manager
 	StateDir string
 	Version  string
+	Session  sessionbridge.Client
 }
 
 func registerSystem(r *registry.Registry, deps systemDeps) {
@@ -74,6 +76,7 @@ func systemInfo(deps systemDeps) map[string]any {
 	wd, _ := os.Getwd()
 	user := os.Getenv("USER")
 	out := map[string]any{"hostname": hostname, "user": user, "cwd": wd, "goos": runtime.GOOS, "goarch": runtime.GOARCH, "cpus": runtime.NumCPU(), "pid": os.Getpid(), "version": deps.Version, "state_dir": deps.StateDir, "root_broker": deps.Broker.Available(), "termux": platform.IsTermux()}
+	out["desktop_session_bridge"] = desktopSessionBridgeSnapshot(deps.Session)
 	if platform.IsTermux() {
 		out["runtime_profile"] = "mobile_assistant"
 		out["android_device_root_support"] = "not_supported"
@@ -392,7 +395,10 @@ func capabilities(r *registry.Registry, deps systemDeps) map[string]any {
 		serviceAdapter = map[string]any{"capability": "service.manage", "adapter": "launchd-user", "score": score(found["launchctl"], 100), "available": found["launchctl"]}
 	}
 	anyAppPath, anyAppAvailable := anyAppInstalledBackend()
+	sessionStatus := desktopSessionBridgeSnapshot(deps.Session)
+	sessionAvailable, _ := sessionStatus["available"].(bool)
 	adapters := []map[string]any{
+		{"capability": "session.exec", "adapter": "desktop-session-bridge", "score": score(sessionAvailable, 120), "available": sessionAvailable, "status": sessionStatus},
 		{"capability": "desktop.semantic", "adapter": "codex-computer-use-linux", "score": score(anyAppAvailable, 110), "available": anyAppAvailable, "path": anyAppBackendBase(anyAppPath), "tools": anyAppToolPrefixCount(r)},
 		{"capability": "local.exec", "adapter": "shell", "score": 100, "available": true},
 		{"capability": "privileged.exec", "adapter": "root-broker", "score": score(platform.SupportsLocalPrivilege() && deps.Broker.Available(), 100), "available": platform.SupportsLocalPrivilege() && deps.Broker.Available()},
@@ -412,7 +418,7 @@ func capabilities(r *registry.Registry, deps systemDeps) map[string]any {
 		{"capability": "android.api", "adapter": "termux-api", "score": score(platform.IsTermux() && found["termux-battery-status"], 90), "available": platform.IsTermux() && found["termux-battery-status"]},
 	}
 	sort.Strings(names)
-	return map[string]any{"tools": names, "binaries": found, "adapters": adapters, "plugins": deps.Plugins.Names(), "targets": deps.Targets.List(), "root_broker": deps.Broker.Available(), "local_privilege_supported": platform.SupportsLocalPrivilege(), "android_device_root_support": func() string {
+	return map[string]any{"tools": names, "binaries": found, "adapters": adapters, "plugins": deps.Plugins.Names(), "targets": deps.Targets.List(), "root_broker": deps.Broker.Available(), "desktop_session_bridge": sessionStatus, "local_privilege_supported": platform.SupportsLocalPrivilege(), "android_device_root_support": func() string {
 		if runtime.GOOS == "android" || platform.IsTermux() {
 			return "not_supported"
 		}
@@ -423,6 +429,24 @@ func capabilities(r *registry.Registry, deps systemDeps) map[string]any {
 		}
 		return "computer_runtime"
 	}(), "policy": deps.Policy.Snapshot(), "platform": runtime.GOOS + "/" + runtime.GOARCH}
+}
+
+func desktopSessionBridgeSnapshot(client sessionbridge.Client) map[string]any {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	status, err := client.Status(ctx)
+	if err != nil {
+		return map[string]any{"available": false, "socket": sessionbridge.DefaultSocketPath()}
+	}
+	data, err := json.Marshal(status)
+	if err != nil {
+		return map[string]any{"available": true}
+	}
+	var out map[string]any
+	if json.Unmarshal(data, &out) != nil {
+		return map[string]any{"available": true}
+	}
+	return out
 }
 
 func parseKeyValue(s string) map[string]string {

@@ -21,19 +21,20 @@ import (
 )
 
 type Job struct {
-	ID        string            `json:"id"`
-	Command   string            `json:"command"`
-	Cwd       string            `json:"cwd,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
-	Shell     string            `json:"shell"`
-	PID       int               `json:"pid"`
-	PGID      int               `json:"pgid,omitempty"`
-	Status    string            `json:"status"`
-	ExitCode  *int              `json:"exit_code,omitempty"`
-	LogFile   string            `json:"log_file"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
-	Error     string            `json:"error,omitempty"`
+	ID               string            `json:"id"`
+	Command          string            `json:"command"`
+	Cwd              string            `json:"cwd,omitempty"`
+	Env              map[string]string `json:"env,omitempty"`
+	Shell            string            `json:"shell"`
+	PID              int               `json:"pid"`
+	PGID             int               `json:"pgid,omitempty"`
+	Status           string            `json:"status"`
+	ExitCode         *int              `json:"exit_code,omitempty"`
+	LogFile          string            `json:"log_file"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	Error            string            `json:"error,omitempty"`
+	ExecutionContext string            `json:"execution_context,omitempty"`
 }
 
 type Manager struct {
@@ -56,11 +57,18 @@ func New(stateDir string) (*Manager, error) {
 }
 
 func (m *Manager) Start(command, cwd, shell string, env map[string]string) (*Job, error) {
+	return m.StartWithContext(command, cwd, shell, env, "service")
+}
+
+func (m *Manager) StartWithContext(command, cwd, shell string, env map[string]string, executionContext string) (*Job, error) {
 	if strings.TrimSpace(command) == "" {
 		return nil, fmt.Errorf("command is required")
 	}
 	if shell == "" {
 		shell = platform.DefaultShell()
+	}
+	if strings.TrimSpace(executionContext) == "" {
+		executionContext = "service"
 	}
 	id := fmt.Sprintf("job-%d-%d", time.Now().UnixMilli(), m.seq.Add(1))
 	logFile := filepath.Join(m.dir, id+".log")
@@ -81,46 +89,122 @@ func (m *Manager) Start(command, cwd, shell string, env map[string]string) (*Job
 		return nil, err
 	}
 	pgid, _ := syscall.Getpgid(cmd.Process.Pid)
+	j := m.recordStartedJob(id, command, cwd, shell, env, executionContext, logFile, cmd.Process.Pid, pgid)
+
+	go func() {
+		err := cmd.Wait()
+		_ = logf.Close()
+		m.finishJob(id, err)
+	}()
+	return clone(j), nil
+}
+
+// StartExternal registers a process launched by another execution domain (for
+// example the graphical session bridge). The durable job store still owns the
+// metadata, logs and signalling surface even though the runtime is not the
+// process parent and therefore cannot recover an exact exit status.
+func (m *Manager) StartExternal(command, cwd, shell string, env map[string]string, executionContext string, launch func(logFile string) (pid, pgid int, err error)) (*Job, error) {
+	if strings.TrimSpace(command) == "" {
+		return nil, fmt.Errorf("command is required")
+	}
+	if launch == nil {
+		return nil, fmt.Errorf("external job launcher is required")
+	}
+	if shell == "" {
+		shell = platform.DefaultShell()
+	}
+	if strings.TrimSpace(executionContext) == "" {
+		executionContext = "user"
+	}
+	id := fmt.Sprintf("job-%d-%d", time.Now().UnixMilli(), m.seq.Add(1))
+	logFile := filepath.Join(m.dir, id+".log")
+	// Create the log with the same private mode before handing the path to the
+	// session bridge. This also fails early if the state directory is unusable.
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
+		return nil, err
+	}
+	pid, pgid, err := launch(logFile)
+	if err != nil {
+		_ = os.Remove(logFile)
+		return nil, err
+	}
+	if pid <= 0 {
+		_ = os.Remove(logFile)
+		return nil, fmt.Errorf("external launcher returned invalid pid %d", pid)
+	}
+	j := m.recordStartedJob(id, command, cwd, shell, env, executionContext, logFile, pid, pgid)
+	go m.monitorExternal(id, pid)
+	return clone(j), nil
+}
+
+func (m *Manager) recordStartedJob(id, command, cwd, shell string, env map[string]string, executionContext, logFile string, pid, pgid int) *Job {
 	now := time.Now().UTC()
 	j := &Job{
 		ID: id, Command: command, Cwd: cwd, Env: env, Shell: shell,
-		PID: cmd.Process.Pid, PGID: pgid, Status: "running", LogFile: logFile,
-		CreatedAt: now, UpdatedAt: now,
+		PID: pid, PGID: pgid, Status: "running", LogFile: logFile,
+		CreatedAt: now, UpdatedAt: now, ExecutionContext: executionContext,
 	}
 	m.mu.Lock()
 	m.jobs[id] = j
 	_ = m.persistLocked(j)
 	m.mu.Unlock()
+	return j
+}
 
-	go func() {
-		err := cmd.Wait()
-		_ = logf.Close()
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		current := m.jobs[id]
-		if current == nil {
-			return
-		}
-		current.UpdatedAt = time.Now().UTC()
-		code := 0
-		if err != nil {
-			var ee *exec.ExitError
-			if errors.As(err, &ee) {
-				code = ee.ExitCode()
-			} else {
-				code = -1
-				current.Error = err.Error()
-			}
-		}
-		current.ExitCode = &code
-		if current.Status == "terminating" {
-			current.Status = "terminated"
+func (m *Manager) finishJob(id string, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current := m.jobs[id]
+	if current == nil {
+		return
+	}
+	current.UpdatedAt = time.Now().UTC()
+	code := 0
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			code = ee.ExitCode()
 		} else {
-			current.Status = "exited"
+			code = -1
+			current.Error = err.Error()
 		}
-		_ = m.persistLocked(current)
-	}()
-	return clone(j), nil
+	}
+	current.ExitCode = &code
+	if current.Status == "terminating" {
+		current.Status = "terminated"
+	} else {
+		current.Status = "exited"
+	}
+	_ = m.persistLocked(current)
+}
+
+func (m *Manager) monitorExternal(id string, pid int) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
+		if processAlive(pid) {
+			continue
+		}
+		m.mu.Lock()
+		j := m.jobs[id]
+		if j != nil && (j.Status == "running" || j.Status == "running-recovered" || j.Status == "terminating") {
+			code := -1
+			j.ExitCode = &code
+			if j.Status == "terminating" {
+				j.Status = "terminated"
+			} else {
+				j.Status = "exited-external"
+			}
+			j.UpdatedAt = time.Now().UTC()
+			_ = m.persistLocked(j)
+		}
+		m.mu.Unlock()
+		return
+	}
 }
 
 func (m *Manager) List() []*Job {
