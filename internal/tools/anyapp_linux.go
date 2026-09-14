@@ -14,35 +14,23 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/registry"
 )
 
-const defaultAnyAppBackend = "/opt/codex-desktop/resources/plugins/openai-bundled/plugins/computer-use/bin/codex-computer-use-linux"
+const (
+	defaultAnyAppBackend     = "/opt/codex-desktop/resources/plugins/openai-bundled/plugins/computer-use/bin/codex-computer-use-linux"
+	defaultAnyAppCallTimeout = 20 * time.Second
+)
 
 type anyAppToolSpec struct {
-	Name        string         `json:"name"`
-	Title       string         `json:"title,omitempty"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
-	Annotations map[string]any `json:"annotations,omitempty"`
-}
-
-type anyAppRPCError struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message"`
-	Data    json.RawMessage `json:"data,omitempty"`
-}
-
-type anyAppRPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *anyAppRPCError `json:"error,omitempty"`
-	Method  string          `json:"method,omitempty"`
+	Name         string         `json:"name"`
+	Title        string         `json:"title,omitempty"`
+	Description  string         `json:"description"`
+	InputSchema  map[string]any `json:"inputSchema"`
+	OutputSchema map[string]any `json:"outputSchema,omitempty"`
+	Annotations  map[string]any `json:"annotations,omitempty"`
 }
 
 type anyAppCallResult struct {
@@ -52,13 +40,8 @@ type anyAppCallResult struct {
 }
 
 type anyAppClient struct {
-	mu      sync.Mutex
-	binary  string
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	decoder *json.Decoder
-	nextID  uint64
-	envSig  string
+	stdioMCPState
+	binary string
 }
 
 func registerAnyApp(r *registry.Registry) {
@@ -85,12 +68,13 @@ func registerAnyApp(r *registry.Registry) {
 			spec.InputSchema = registry.ObjectSchema(nil, nil)
 		}
 		_ = r.Add(registry.Tool{
-			Name:        name,
-			Title:       spec.Title,
-			Description: description,
-			InputSchema: spec.InputSchema,
-			Annotations: spec.Annotations,
-			Source:      "core:anyapp",
+			Name:         name,
+			Title:        spec.Title,
+			Description:  description,
+			InputSchema:  spec.InputSchema,
+			OutputSchema: spec.OutputSchema,
+			Annotations:  spec.Annotations,
+			Source:       "core:anyapp",
 			Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
 				return client.callTool(ctx, spec.Name, raw)
 			},
@@ -150,6 +134,12 @@ func discoverAnyAppTools(binary string) ([]anyAppToolSpec, error) {
 }
 
 func (c *anyAppClient) callTool(ctx context.Context, tool string, raw json.RawMessage) (any, error) {
+	// Desktop backends can block indefinitely when a compositor removes or
+	// reconfigures outputs (for example physical -> headless-only). Bound every
+	// call so a wedged capture/portal cannot stall CyComAgent or its tunnel.
+	callCtx, cancel := context.WithTimeout(ctx, defaultAnyAppCallTimeout)
+	defer cancel()
+	ctx = callCtx
 	if len(raw) == 0 || string(raw) == "null" {
 		raw = json.RawMessage(`{}`)
 	}
@@ -236,138 +226,23 @@ func anyAppContentError(content []map[string]any) string {
 func (c *anyAppClient) ensureStartedLocked(ctx context.Context) error {
 	env := desktopEnvironment()
 	sig := anyAppDesktopEnvSignature(env) + "\x00" + anyAppBinaryFingerprint(c.binary)
-	if c.cmd != nil && c.cmd.Process != nil && c.envSig == sig {
-		return nil
-	}
-	c.stopLocked()
-
-	cmd := exec.Command(c.binary, "mcp")
-	cmd.Env = env
-	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGTERM}
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("Any App stdin: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		return fmt.Errorf("Any App stdout: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
-		return fmt.Errorf("start Any App backend: %w", err)
-	}
-	c.cmd = cmd
-	c.stdin = stdin
-	c.decoder = json.NewDecoder(stdout)
-	c.envSig = sig
-	c.nextID = 0
-
-	if _, err := c.rpcLocked(ctx, "initialize", map[string]any{
-		"protocolVersion": "2025-06-18",
-		"capabilities":    map[string]any{},
-		"clientInfo": map[string]any{
-			"name":    "CyComAgent-AnyApp",
-			"version": "1",
-		},
-	}); err != nil {
-		c.stopLocked()
-		return fmt.Errorf("initialize Any App backend: %w", err)
-	}
-	if err := c.writeLocked(map[string]any{
-		"jsonrpc": "2.0",
-		"method":  "notifications/initialized",
-	}); err != nil {
-		c.stopLocked()
-		return fmt.Errorf("notify Any App initialized: %w", err)
-	}
-	return nil
+	return c.stdioMCPState.ensureStartedLocked(ctx, c.binary, []string{"mcp"}, env, sig, "Any App", "CyComAgent-AnyApp")
 }
 
 func (c *anyAppClient) rpcLocked(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	if c.cmd == nil || c.stdin == nil || c.decoder == nil {
-		return nil, errors.New("Any App backend is not running")
+	result, err := c.stdioMCPState.rpcLocked(ctx, method, params, "Any App")
+	if err == nil {
+		return result, nil
 	}
-	c.nextID++
-	id := c.nextID
-	if err := c.writeLocked(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"method":  method,
-		"params":  params,
-	}); err != nil {
-		c.stopLocked()
-		return nil, fmt.Errorf("write Any App %s: %w", method, err)
+	// Preserve Any App's established behavior: provider-level JSON-RPC errors
+	// are surfaced to the outer dispatcher as ordinary tool errors. The shared
+	// stdio seam retains error data for bridges that explicitly forward the
+	// protocol error, such as agent-workspace-linux.
+	var rpcErr *registry.JSONRPCError
+	if errors.As(err, &rpcErr) {
+		return nil, fmt.Errorf("Any App RPC %s failed (%d): %s", method, rpcErr.Code, rpcErr.Message)
 	}
-
-	type decoded struct {
-		resp anyAppRPCResponse
-		err  error
-	}
-	ch := make(chan decoded, 1)
-	decoder := c.decoder
-	go func() {
-		for {
-			var resp anyAppRPCResponse
-			if err := decoder.Decode(&resp); err != nil {
-				ch <- decoded{err: err}
-				return
-			}
-			if len(resp.ID) == 0 {
-				continue
-			}
-			var got uint64
-			if err := json.Unmarshal(resp.ID, &got); err != nil || got != id {
-				continue
-			}
-			ch <- decoded{resp: resp}
-			return
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		c.stopLocked()
-		return nil, ctx.Err()
-	case out := <-ch:
-		if out.err != nil {
-			c.stopLocked()
-			return nil, fmt.Errorf("read Any App %s: %w", method, out.err)
-		}
-		if out.resp.Error != nil {
-			return nil, fmt.Errorf("Any App RPC %s failed (%d): %s", method, out.resp.Error.Code, out.resp.Error.Message)
-		}
-		return out.resp.Result, nil
-	}
-}
-
-func (c *anyAppClient) writeLocked(value any) error {
-	if c.stdin == nil {
-		return io.ErrClosedPipe
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	_, err = c.stdin.Write(data)
-	return err
-}
-
-func (c *anyAppClient) stopLocked() {
-	if c.stdin != nil {
-		_ = c.stdin.Close()
-	}
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = syscall.Kill(-c.cmd.Process.Pid, syscall.SIGTERM)
-		_ = c.cmd.Process.Kill()
-		_ = c.cmd.Wait()
-	}
-	c.cmd = nil
-	c.stdin = nil
-	c.decoder = nil
-	c.envSig = ""
+	return nil, err
 }
 
 func anyAppDesktopEnvSignature(env []string) string {

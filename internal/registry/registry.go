@@ -18,16 +18,46 @@ type Handler func(context.Context, json.RawMessage) (any, error)
 type RichResult struct {
 	Structured any              `json:"structured"`
 	Content    []map[string]any `json:"content"`
+	IsError    bool             `json:"isError"`
+
+	// ContentPresent and StructuredPresent distinguish an omitted provider
+	// field from an explicit empty/null field when a rich result is forwarded.
+	// Existing callers can leave these false and retain the registry's normal
+	// success-result fallback behavior.
+	ContentPresent    bool `json:"-"`
+	StructuredPresent bool `json:"-"`
+
+	// Extra carries provider-defined result fields that CyComAgent does not
+	// interpret. Raw messages preserve their exact JSON representation,
+	// including native blocks and large numeric values.
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+// JSONRPCError is an upstream JSON-RPC protocol error. The bridge keeps the
+// provider's code, message, and opaque data together so an outer MCP server
+// can surface the same error without reducing it to a text-only result.
+type JSONRPCError struct {
+	Code    int
+	Message string
+	Data    json.RawMessage
+}
+
+func (e *JSONRPCError) Error() string {
+	if e == nil {
+		return "JSON-RPC error"
+	}
+	return fmt.Sprintf("JSON-RPC error (%d): %s", e.Code, e.Message)
 }
 
 type Tool struct {
-	Name        string         `json:"name"`
-	Title       string         `json:"title,omitempty"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
-	Annotations map[string]any `json:"annotations,omitempty"`
-	Handler     Handler        `json:"-"`
-	Source      string         `json:"-"`
+	Name         string         `json:"name"`
+	Title        string         `json:"title,omitempty"`
+	Description  string         `json:"description"`
+	InputSchema  map[string]any `json:"inputSchema"`
+	OutputSchema map[string]any `json:"outputSchema,omitempty"`
+	Annotations  map[string]any `json:"annotations,omitempty"`
+	Handler      Handler        `json:"-"`
+	Source       string         `json:"-"`
 }
 
 type Interceptor interface {

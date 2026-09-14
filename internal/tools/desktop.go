@@ -287,7 +287,7 @@ func desktopEnvironment() []string {
 			commBytes, _ := os.ReadFile(filepath.Join("/proc", e.Name(), "comm"))
 			comm := strings.TrimSpace(string(commBytes))
 			switch comm {
-			case "plasmashell", "kwin_wayland", "gnome-shell", "Xorg":
+			case "plasmashell", "kwin_wayland", "gnome-shell", "labwc", "labwc-cyedge", "sway", "Hyprland", "Xorg":
 			default:
 				continue
 			}
