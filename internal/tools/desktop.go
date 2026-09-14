@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -54,21 +55,16 @@ func desktopCapture(ctx context.Context, raw json.RawMessage, stateDir string) (
 		}
 		path = filepath.Join(dir, fmt.Sprintf("desktop-%d.png", time.Now().UnixMilli()))
 	}
-	adapter, cmd, args, err := screenshotCommand(path)
+	adapter, failures, err := captureDesktopAdaptive(ctx, path)
 	if err != nil {
 		return nil, err
-	}
-	c := exec.CommandContext(ctx, cmd, args...)
-	c.Env = desktopEnvironment()
-	if b, err := c.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("%s capture failed: %w: %s", adapter, err, strings.TrimSpace(string(b)))
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	return registry.RichResult{
-		Structured: map[string]any{"path": path, "adapter": adapter, "bytes": len(data), "mime_type": "image/png"},
+		Structured: map[string]any{"path": path, "adapter": adapter, "bytes": len(data), "mime_type": "image/png", "fallback_failures": failures},
 		Content: []map[string]any{
 			{"type": "text", "text": fmt.Sprintf("Desktop capture via %s (%s)", adapter, path)},
 			{"type": "image", "data": base64.StdEncoding.EncodeToString(data), "mimeType": "image/png"},
@@ -76,28 +72,64 @@ func desktopCapture(ctx context.Context, raw json.RawMessage, stateDir string) (
 	}, nil
 }
 
-func screenshotCommand(path string) (string, string, []string, error) {
-	if runtime.GOOS == "darwin" {
-		if p, err := exec.LookPath("screencapture"); err == nil {
-			return "screencapture", p, []string{"-x", path}, nil
+type desktopCommandCandidate struct {
+	adapter string
+	cmd     string
+	args    []string
+}
+
+const desktopAdapterAttemptTimeout = 8 * time.Second
+
+func screenshotCandidates(path string) []desktopCommandCandidate {
+	var out []desktopCommandCandidate
+	add := func(adapter, binary string, args ...string) {
+		if p, err := exec.LookPath(binary); err == nil {
+			out = append(out, desktopCommandCandidate{adapter: adapter, cmd: p, args: args})
 		}
 	}
-	if p, err := exec.LookPath("spectacle"); err == nil {
-		return "spectacle", p, []string{"-b", "-n", "-o", path}, nil
+	if runtime.GOOS == "darwin" {
+		add("screencapture", "screencapture", "-x", path)
+		return out
 	}
-	if p, err := exec.LookPath("grim"); err == nil {
-		return "grim", p, []string{path}, nil
+	// Prefer desktop-integrated/portal-aware tools when installed, then generic
+	// Wayland, then X11. Every attempt is bounded and failures fall through.
+	add("spectacle", "spectacle", "-b", "-n", "-o", path)
+	add("grim", "grim", path)
+	add("gnome-screenshot", "gnome-screenshot", "-f", path)
+	add("scrot", "scrot", path)
+	add("imagemagick-import", "import", "-window", "root", path)
+	return out
+}
+
+func captureDesktopAdaptive(ctx context.Context, path string) (string, []string, error) {
+	candidates := screenshotCandidates(path)
+	if len(candidates) == 0 {
+		return "", nil, fmt.Errorf("no supported screenshot adapter found")
 	}
-	if p, err := exec.LookPath("gnome-screenshot"); err == nil {
-		return "gnome-screenshot", p, []string{"-f", path}, nil
+	var failures []string
+	for _, candidate := range candidates {
+		_ = os.Remove(path)
+		attemptCtx, cancel := context.WithTimeout(ctx, desktopAdapterAttemptTimeout)
+		cmd := exec.CommandContext(attemptCtx, candidate.cmd, candidate.args...)
+		cmd.Env = desktopEnvironment() // rediscover live session for every attempt
+		output, err := cmd.CombinedOutput()
+		cancel()
+		if err == nil {
+			if st, statErr := os.Stat(path); statErr == nil && st.Size() > 0 {
+				return candidate.adapter, failures, nil
+			}
+			err = fmt.Errorf("capture produced no image")
+		}
+		reason := strings.TrimSpace(string(output))
+		if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+			reason = "timed out"
+		}
+		if reason == "" {
+			reason = err.Error()
+		}
+		failures = append(failures, candidate.adapter+": "+reason)
 	}
-	if p, err := exec.LookPath("scrot"); err == nil {
-		return "scrot", p, []string{path}, nil
-	}
-	if p, err := exec.LookPath("import"); err == nil {
-		return "imagemagick-import", p, []string{"-window", "root", path}, nil
-	}
-	return "", "", nil, fmt.Errorf("no supported screenshot adapter found (screencapture, spectacle, grim, gnome-screenshot, scrot, import)")
+	return "", failures, fmt.Errorf("all desktop capture adapters failed: %s", strings.Join(failures, "; "))
 }
 
 func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -238,7 +270,9 @@ func macOSKeyAppleScript(key string) (string, bool) {
 }
 
 func runDesktop(ctx context.Context, adapter, cmd string, args []string) (any, error) {
-	c := exec.CommandContext(ctx, cmd, args...)
+	attemptCtx, cancel := context.WithTimeout(ctx, desktopAdapterAttemptTimeout)
+	defer cancel()
+	c := exec.CommandContext(attemptCtx, cmd, args...)
 	c.Env = desktopEnvironment()
 	b, err := c.CombinedOutput()
 	if err != nil {

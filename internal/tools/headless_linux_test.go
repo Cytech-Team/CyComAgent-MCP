@@ -39,3 +39,16 @@ func TestDesktopSessionEnvScoreIsCompositorAgnostic(t *testing.T) {
 		t.Fatal("generic X11 session should outrank a non-graphical environment")
 	}
 }
+
+func TestScreenshotCandidatesAreFallbackChain(t *testing.T) {
+	if desktopAdapterAttemptTimeout <= 0 || desktopAdapterAttemptTimeout > 15*time.Second {
+		t.Fatalf("unexpected desktop adapter timeout: %v", desktopAdapterAttemptTimeout)
+	}
+	// Availability is host-dependent; the invariant is that candidate discovery
+	// never invents a backend that is not executable on this host.
+	for _, c := range screenshotCandidates("/tmp/cycom-test.png") {
+		if c.cmd == "" {
+			t.Fatalf("empty command for adapter %q", c.adapter)
+		}
+	}
+}
