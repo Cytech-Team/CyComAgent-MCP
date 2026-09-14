@@ -252,8 +252,6 @@ func runDesktop(ctx context.Context, adapter, cmd string, args []string) (any, e
 // login discover Wayland/X11/DBus variables later without being restarted.
 func desktopEnvironment() []string {
 	if runtime.GOOS == "darwin" {
-		// LaunchAgents already inherit the logged-in user's GUI bootstrap domain.
-		// TCC (Screen Recording / Accessibility / Automation) remains authoritative.
 		return os.Environ()
 	}
 	envMap := map[string]string{}
@@ -268,9 +266,16 @@ func desktopEnvironment() []string {
 		"XDG_CURRENT_DESKTOP": true, "XDG_SESSION_TYPE": true,
 		"XDG_SESSION_DESKTOP": true, "DESKTOP_SESSION": true, "KDE_FULL_SESSION": true,
 	}
-	// If a useful desktop environment is already inherited, keep it.
+
+	// Do not key session discovery to a compositor allow-list. Desktop stacks
+	// change frequently and custom compositors are common. Instead inspect every
+	// same-UID process and score environments by evidence that they belong to a
+	// live graphical session. This covers wlroots compositors, KDE, GNOME,
+	// COSMIC, X11, nested/headless compositors, and future/custom desktops.
 	if envMap["WAYLAND_DISPLAY"] == "" && envMap["DISPLAY"] == "" {
 		uid := os.Getuid()
+		bestScore := -1
+		best := map[string]string{}
 		entries, _ := os.ReadDir("/proc")
 		for _, e := range entries {
 			pid, err := strconv.Atoi(e.Name())
@@ -284,30 +289,30 @@ func desktopEnvironment() []string {
 			if stat, ok := info.Sys().(*syscall.Stat_t); !ok || int(stat.Uid) != uid {
 				continue
 			}
-			commBytes, _ := os.ReadFile(filepath.Join("/proc", e.Name(), "comm"))
-			comm := strings.TrimSpace(string(commBytes))
-			switch comm {
-			case "plasmashell", "kwin_wayland", "gnome-shell", "labwc", "labwc-cyedge", "sway", "Hyprland", "Xorg":
-			default:
-				continue
-			}
 			data, err := os.ReadFile(filepath.Join("/proc", e.Name(), "environ"))
 			if err != nil {
 				continue
 			}
+			candidate := map[string]string{}
 			for _, item := range strings.Split(string(data), "\x00") {
 				if i := strings.IndexByte(item, '='); i > 0 && wanted[item[:i]] {
-					envMap[item[:i]] = item[i+1:]
+					candidate[item[:i]] = item[i+1:]
 				}
 			}
-			if envMap["WAYLAND_DISPLAY"] != "" || envMap["DISPLAY"] != "" {
-				break
+			score := desktopSessionEnvScore(candidate, uid)
+			if score > bestScore {
+				bestScore, best = score, candidate
+			}
+		}
+		if bestScore > 0 {
+			for k, v := range best {
+				if v != "" {
+					envMap[k] = v
+				}
 			}
 		}
 	}
-	// System services often start before the graphical session and may be
-	// unable to read another process' /proc/<pid>/environ on hardened systems.
-	// Fill deterministic per-user session paths when they are discoverable.
+
 	uid := os.Getuid()
 	runtimeDir := fmt.Sprintf("/run/user/%d", uid)
 	if envMap["XDG_RUNTIME_DIR"] == "" {
@@ -352,12 +357,41 @@ func desktopEnvironment() []string {
 			envMap["XAUTHORITY"] = matches[0]
 		}
 	}
-	if envMap["XDG_CURRENT_DESKTOP"] == "" {
-		if processNameExistsForUID(uid, "plasmashell") || processNameExistsForUID(uid, "kwin_wayland") {
-			envMap["XDG_CURRENT_DESKTOP"] = "KDE"
-			envMap["KDE_FULL_SESSION"] = "true"
+	return sortedDesktopEnvironment(envMap)
+}
+
+func desktopSessionEnvScore(env map[string]string, uid int) int {
+	score := 0
+	if wd := env["WAYLAND_DISPLAY"]; wd != "" {
+		score += 100
+		path := wd
+		if !filepath.IsAbs(path) {
+			runtimeDir := env["XDG_RUNTIME_DIR"]
+			if runtimeDir == "" {
+				runtimeDir = fmt.Sprintf("/run/user/%d", uid)
+			}
+			path = filepath.Join(runtimeDir, wd)
+		}
+		if st, err := os.Stat(path); err == nil && st.Mode()&os.ModeSocket != 0 {
+			score += 100
 		}
 	}
+	if env["DISPLAY"] != "" {
+		score += 80
+	}
+	if env["DBUS_SESSION_BUS_ADDRESS"] != "" {
+		score += 20
+	}
+	if env["XDG_SESSION_TYPE"] != "" {
+		score += 10
+	}
+	if env["XDG_CURRENT_DESKTOP"] != "" || env["XDG_SESSION_DESKTOP"] != "" || env["DESKTOP_SESSION"] != "" {
+		score += 10
+	}
+	return score
+}
+
+func sortedDesktopEnvironment(envMap map[string]string) []string {
 	out := make([]string, 0, len(envMap))
 	for k, v := range envMap {
 		out = append(out, k+"="+v)
