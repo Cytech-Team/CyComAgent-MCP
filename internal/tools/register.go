@@ -30,6 +30,7 @@ func Register(r *registry.Registry, deps Dependencies) {
 	registerProcess(r, processDeps{Jobs: deps.Jobs, Broker: deps.Broker, Session: deps.Session})
 	registerJobs(r, deps.Jobs)
 	registerSystem(r, systemDeps{Broker: deps.Broker, Plugins: deps.Plugins, Policy: deps.Policy, Targets: deps.Targets, StateDir: deps.StateDir, Version: deps.Version, Session: deps.Session})
+	registerSessionControl(r, deps.Broker)
 	registerTermuxAPI(r, deps.Policy)
 	registerTermuxAssistant(r)
 	registerDesktop(r, deps.StateDir)
