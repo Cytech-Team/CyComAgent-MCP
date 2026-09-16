@@ -4,7 +4,7 @@
 
 CyComAgent-MCP is an AI-native computer runtime that exposes a real machine — and optional remote machines — as a compact set of composable MCP primitives. The model supplies the reasoning; CyComAgent supplies filesystem, process, persistent job, service, network, desktop, durable state, multi-machine target, policy, audit, plugin, and privileged-execution capabilities.
 
-`v0.4.7-session-routing-dev` adds Linux execution-context routing so GUI/session-sensitive commands can be born inside the active graphical login session instead of inheriting the CyComAgent system-service cgroup. The existing optional Linux Any App bridge, macOS, Termux, and Windows paths remain available. This is the source development version; the curl bootstrap continues to install the latest published release until new release assets are published.
+`v0.4.8-isolated-desktop-dev` adds an isolated Linux AI desktop runtime and capability negotiation. CyCom can route input to a dedicated headless Wayland compositor instead of the user desktop, while retaining the v0.4.7 login-session execution routing, optional Linux Any App bridge, macOS, Termux, and Windows paths. This is the source development version; the curl bootstrap continues to install the latest published release until new release assets are published.
 
 ## What “Full Power” means
 
@@ -23,7 +23,8 @@ CyComAgent-MCP
    ├── processes + stdin
    ├── persistent jobs
    ├── service/network/system
-   ├── desktop capture/input
+   ├── desktop capture/input + capability routing
+   ├── isolated AI desktop (Linux/Wayland)
    ├── durable explicit state
    ├── local + SSH machine targets
    ├── external capability plugins
@@ -48,6 +49,7 @@ There is no required `primary SSH session`. Remote targets are durable configura
 8. **Full-power by policy, not by accident:** default policy is `full`, but `safe` and `readonly` modes are built in.
 9. **Observable:** every tool call is audit logged without silently copying its arguments.
 10. **Extensible:** JSON-over-stdio plugins can add tools without modifying core.
+11. **Isolation-aware desktop routing:** AI input can target a dedicated compositor and must not silently fall back to global input when isolation is required.
 
 ## MCP compatibility
 
@@ -77,7 +79,7 @@ Application state is explicit (`job_*`, `state_*`, `target_*`) rather than hidde
 
 `system_info`, `system_env`, `service_control`, `network_request`, `network_tcp`, `network_resolve`, `capabilities_list`, `plugins_reload`
 
-`capabilities_list` includes detected binaries, adapter availability/scores, policy, plugins, root broker, targets, and desktop-session-bridge status.
+`capabilities_list` includes detected binaries, adapter availability/scores, policy, plugins, root broker, targets, desktop-session-bridge status, and a `desktop_runtime` snapshot. The desktop runtime reports the current session plus detected Wayland/X11/macOS adapters and whether an input backend is considered isolated or a global fallback.
 
 ### Linux desktop-session bridge
 
@@ -91,7 +93,32 @@ When the bridge is absent, service/headless execution keeps working normally. Ex
 
 `desktop_capture`, `desktop_input`
 
-Adapters are selected from available host tools such as `grim`, `spectacle`, `ydotool`, `wtype`, or `xdotool` rather than hard-coding a desktop environment.
+Adapters are selected from available host capabilities rather than hard-coding a desktop environment. The desktop runtime currently detects wlroots/Wayland, libei tooling, desktop portals, X11/XTest, Linux uinput fallback, and the macOS path, then scores available adapters per capability.
+
+`desktop_input` accepts `target=current|headless|auto`. `current` keeps the normal desktop behavior. On Linux, `headless` reads the dedicated CyCom AI Wayland socket and sends compositor-scoped virtual pointer/keyboard events with `wlrctl`/`wtype`. If that isolated compositor or socket is unavailable, the call **fails closed**; it does not fall back to `ydotool`/uinput and risk moving the user's physical-session pointer. `auto` is reserved for router-driven target selection and currently retains normal current-desktop behavior unless a more specific route is selected.
+
+Example isolated input call:
+
+```json
+{
+  "target": "headless",
+  "action": "mouse_move",
+  "x": 640,
+  "y": 360
+}
+```
+
+The isolated Linux layout is intentionally separate from the physical session:
+
+```text
+User desktop                    AI desktop
+wayland-0                       wayland-1
+eDP-1 / HDMI-A-1               HEADLESS-1
+physical mouse + keyboard       virtual pointer + keyboard
+normal apps / games             AI-controlled apps
+```
+
+`ydotool`/uinput remains an explicit global fallback for environments that need it, but it is not classified as isolated input.
 
 ### Optional Linux Any App tools
 
@@ -212,7 +239,7 @@ This keeps application-specific capabilities outside the generic core.
 
 ## Platform status
 
-- Linux: supported (Full Power path, systemd/root broker available when configured).
+- Linux: supported (Full Power path, systemd/root broker available when configured). Wayland development builds also support capability-aware desktop routing and an isolated headless AI compositor path on compatible wlroots setups.
 - Android / Termux arm64: development support as a **`mobile_assistant`** runtime (non-root core + semantic Android assistant tools + runit service adapter). Android device root / `su` is **not supported and not planned**. `sudo` on remote SSH targets or inside a non-root userspace/container such as proot remains allowed where that environment provides it.
 - Windows 10/11: development support through the bundled Windows-native PowerShell bridge under `platform/windows` (6 native tools, loopback-only MCP, token auth, optional SYSTEM startup task). This bridge is intentionally smaller than the Linux core and is not yet feature-parity.
 - macOS 12+ (experimental): portable Go core builds for Apple Silicon arm64 and Intel amd64, user-level `launchd`/LaunchAgent integration, built-in `screencapture`, and AppleScript/optional `cliclick` desktop input adapters. Local root broker is not supported. This path is CI-validated but has not yet been tested on the project owner's physical Mac hardware.
