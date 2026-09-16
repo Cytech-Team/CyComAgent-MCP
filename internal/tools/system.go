@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/broker"
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/desktopruntime"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/platform"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/plugins"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/policy"
@@ -418,7 +419,7 @@ func capabilities(r *registry.Registry, deps systemDeps) map[string]any {
 		{"capability": "android.api", "adapter": "termux-api", "score": score(platform.IsTermux() && found["termux-battery-status"], 90), "available": platform.IsTermux() && found["termux-battery-status"]},
 	}
 	sort.Strings(names)
-	return map[string]any{"tools": names, "binaries": found, "adapters": adapters, "plugins": deps.Plugins.Names(), "targets": deps.Targets.List(), "root_broker": deps.Broker.Available(), "desktop_session_bridge": sessionStatus, "local_privilege_supported": platform.SupportsLocalPrivilege(), "android_device_root_support": func() string {
+	return map[string]any{"tools": names, "binaries": found, "adapters": adapters, "desktop_runtime": desktopruntime.Detect(), "plugins": deps.Plugins.Names(), "targets": deps.Targets.List(), "root_broker": deps.Broker.Available(), "desktop_session_bridge": sessionStatus, "local_privilege_supported": platform.SupportsLocalPrivilege(), "android_device_root_support": func() string {
 		if runtime.GOOS == "android" || platform.IsTermux() {
 			return "not_supported"
 		}

@@ -18,7 +18,7 @@ import (
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/sessionbridge"
 )
 
-var version = "0.4.7-session-routing-dev"
+var version = "0.4.8-isolated-desktop-dev"
 
 func main() {
 	mode := flag.String("mode", envOr("CYCOM_MODE", "http"), "transport: http or stdio")

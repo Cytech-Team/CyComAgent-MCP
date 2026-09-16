@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.8-isolated-desktop-dev (source)
+
+- Add desktop runtime capability negotiation for Wayland, X11, macOS, and explicit global fallbacks.
+- Add `desktop_input.target=headless` routing to the isolated CyCom AI Wayland compositor.
+- Use compositor-scoped virtual pointer/keyboard input for headless automation and fail closed instead of falling back to global uinput.
+- Expose desktop runtime detection through `capabilities_list`.
+
 ## 0.4.7-session-routing-dev (source)
 
 - Added Linux `execution_context=auto|service|user|desktop|system` routing to `process_exec` and `process_spawn`.

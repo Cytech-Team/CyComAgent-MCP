@@ -31,6 +31,7 @@ func registerDesktop(r *registry.Registry, stateDir string) {
 		Name: "desktop_input", Description: "Send generic desktop input using the best available adapter. Supports text, key, click and mouse_move actions.",
 		InputSchema: registry.ObjectSchema(map[string]any{
 			"action": map[string]any{"type": "string", "enum": []string{"text", "key", "click", "mouse_move"}},
+			"target": map[string]any{"type": "string", "enum": []string{"current", "headless", "auto"}, "description": "desktop target; headless routes to the isolated CyCom AI compositor without sharing physical input"},
 			"text":   registry.String("text to type"),
 			"key":    registry.String("key or key chord, adapter-specific names accepted"),
 			"button": registry.Integer("mouse button; 1=left, 2=middle, 3=right"),
@@ -135,6 +136,7 @@ func captureDesktopAdaptive(ctx context.Context, path string) (string, []string,
 func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 	var in struct {
 		Action string `json:"action"`
+		Target string `json:"target"`
 		Text   string `json:"text"`
 		Key    string `json:"key"`
 		Button int    `json:"button"`
@@ -143,6 +145,16 @@ func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 	if err := decode(raw, &in); err != nil {
 		return nil, err
+	}
+
+	if in.Target == "" {
+		in.Target = "current"
+	}
+	if in.Target == "headless" {
+		return desktopInputHeadless(ctx, in.Action, in.Text, in.Key, in.Button, in.X, in.Y)
+	}
+	if in.Target != "current" && in.Target != "auto" {
+		return nil, fmt.Errorf("unsupported desktop target %q", in.Target)
 	}
 
 	type candidate struct {
@@ -227,6 +239,95 @@ func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 		failures = append(failures, err.Error())
 	}
 	return nil, fmt.Errorf("all desktop input adapters failed for action %q: %s", in.Action, strings.Join(failures, "; "))
+}
+
+func desktopInputHeadless(ctx context.Context, action, text, key string, button, x, y int) (any, error) {
+	env, display, err := cycomHeadlessEnvironment()
+	if err != nil {
+		return nil, err
+	}
+	var cmd string
+	var args []string
+	switch action {
+	case "text":
+		if text == "" {
+			return nil, fmt.Errorf("text is required")
+		}
+		cmd, err = exec.LookPath("wlrctl")
+		args = []string{"keyboard", "type", text}
+	case "key":
+		if key == "" {
+			return nil, fmt.Errorf("key is required")
+		}
+		// wtype is a virtual-keyboard Wayland client and stays inside this compositor.
+		cmd, err = exec.LookPath("wtype")
+		args = []string{"-k", key}
+	case "click":
+		if button == 0 {
+			button = 1
+		}
+		name := map[int]string{1: "left", 2: "middle", 3: "right"}[button]
+		if name == "" {
+			return nil, fmt.Errorf("unsupported mouse button %d", button)
+		}
+		cmd, err = exec.LookPath("wlrctl")
+		args = []string{"pointer", "click", name}
+	case "mouse_move":
+		cmd, err = exec.LookPath("wlrctl")
+		args = []string{"pointer", "move", strconv.Itoa(x), strconv.Itoa(y)}
+	default:
+		return nil, fmt.Errorf("unsupported action %q", action)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("isolated Wayland input adapter unavailable: %w", err)
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, desktopAdapterAttemptTimeout)
+	defer cancel()
+	c := exec.CommandContext(attemptCtx, cmd, args...)
+	c.Env = env
+	out, runErr := c.CombinedOutput()
+	if runErr != nil {
+		return nil, fmt.Errorf("isolated-wayland failed: %w: %s", runErr, strings.TrimSpace(string(out)))
+	}
+	return map[string]any{"ok": true, "adapter": "isolated-wayland", "target": "headless", "wayland_display": display, "shared_physical_input": false}, nil
+}
+
+func cycomHeadlessEnvironment() ([]string, string, error) {
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir == "" {
+		runtimeDir = fmt.Sprintf("/run/user/%d", os.Getuid())
+	}
+	stateDir := os.Getenv("CYCOM_AI_DESKTOP_STATE")
+	if stateDir == "" {
+		home, _ := os.UserHomeDir()
+		stateDir = filepath.Join(home, ".local", "state", "cycom-ai-desktop")
+	}
+	data, err := os.ReadFile(filepath.Join(stateDir, "wayland-display"))
+	if err != nil {
+		return nil, "", fmt.Errorf("isolated AI desktop unavailable: %w", err)
+	}
+	display := strings.TrimSpace(string(data))
+	if display == "" {
+		return nil, "", fmt.Errorf("isolated AI desktop has no Wayland display")
+	}
+	st, err := os.Stat(filepath.Join(runtimeDir, display))
+	if err != nil || st.Mode()&os.ModeSocket == 0 {
+		return nil, "", fmt.Errorf("isolated AI Wayland socket %s is unavailable", display)
+	}
+	envMap := map[string]string{}
+	for _, e := range os.Environ() {
+		if i := strings.IndexByte(e, '='); i > 0 {
+			envMap[e[:i]] = e[i+1:]
+		}
+	}
+	envMap["XDG_RUNTIME_DIR"] = runtimeDir
+	envMap["WAYLAND_DISPLAY"] = display
+	envMap["XDG_CURRENT_DESKTOP"] = "labwc-ai"
+	envMap["XDG_SESSION_DESKTOP"] = "labwc-ai"
+	envMap["XDG_SESSION_TYPE"] = "wayland"
+	envMap["CYCOM_AI_DESKTOP"] = "1"
+	delete(envMap, "DISPLAY")
+	return sortedDesktopEnvironment(envMap), display, nil
 }
 
 func macOSKeyAppleScript(key string) (string, bool) {
