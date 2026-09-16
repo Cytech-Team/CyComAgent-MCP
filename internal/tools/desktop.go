@@ -253,7 +253,7 @@ func desktopInputHeadless(ctx context.Context, action, text, key string, button,
 		if text == "" {
 			return nil, fmt.Errorf("text is required")
 		}
-		cmd, err = exec.LookPath("wlrctl")
+		cmd, err = isolatedInputBinary("wlrctl")
 		args = []string{"keyboard", "type", text}
 	case "key":
 		if key == "" {
@@ -270,10 +270,10 @@ func desktopInputHeadless(ctx context.Context, action, text, key string, button,
 		if name == "" {
 			return nil, fmt.Errorf("unsupported mouse button %d", button)
 		}
-		cmd, err = exec.LookPath("wlrctl")
+		cmd, err = isolatedInputBinary("wlrctl")
 		args = []string{"pointer", "click", name}
 	case "mouse_move":
-		cmd, err = exec.LookPath("wlrctl")
+		cmd, err = isolatedInputBinary("wlrctl")
 		args = []string{"pointer", "move", strconv.Itoa(x), strconv.Itoa(y)}
 	default:
 		return nil, fmt.Errorf("unsupported action %q", action)
@@ -290,6 +290,20 @@ func desktopInputHeadless(ctx context.Context, action, text, key string, button,
 		return nil, fmt.Errorf("isolated-wayland failed: %w: %s", runErr, strings.TrimSpace(string(out)))
 	}
 	return map[string]any{"ok": true, "adapter": "isolated-wayland", "target": "headless", "wayland_display": display, "shared_physical_input": false}, nil
+}
+
+func isolatedInputBinary(name string) (string, error) {
+	if p, err := exec.LookPath(name); err == nil {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err == nil {
+		p := filepath.Join(home, ".local", "bin", name)
+		if st, statErr := os.Stat(p); statErr == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("%s not found in PATH or ~/.local/bin", name)
 }
 
 func cycomHeadlessEnvironment() ([]string, string, error) {
