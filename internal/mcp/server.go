@@ -24,12 +24,18 @@ const (
 	maxBodyBytes   = 4 << 20
 )
 
+const compatibilityReason = "compatibility fallback: MCP client omitted required reason"
+
 type Server struct {
 	Name         string
 	Version      string
 	Instructions string
 	Registry     *registry.Registry
 	Strict       bool
+	// CompatMissingReason permits legacy MCP clients that omit the required
+	// reason argument. The adapter only fills it for a valid object argument;
+	// malformed/non-object arguments remain subject to registry validation.
+	CompatMissingReason bool
 
 	requests  atomic.Uint64
 	toolCalls atomic.Uint64
@@ -58,6 +64,13 @@ type rpcError struct {
 
 type metaEnvelope struct {
 	Meta map[string]json.RawMessage `json:"_meta"`
+}
+
+type toolCallParams struct {
+	Name      string                     `json:"name"`
+	Arguments json.RawMessage            `json:"arguments"`
+	Reason    json.RawMessage            `json:"reason"`
+	Meta      map[string]json.RawMessage `json:"_meta"`
 }
 
 func (s *Server) Metrics() map[string]uint64 {
@@ -276,6 +289,9 @@ func (s *Server) dispatch(ctx context.Context, req rpcRequest, modern bool) (any
 				"description": t.Description,
 				"inputSchema": t.InputSchema,
 			}
+			if t.OutputSchema != nil {
+				item["outputSchema"] = t.OutputSchema
+			}
 			if t.Title != "" {
 				item["title"] = t.Title
 			}
@@ -294,10 +310,7 @@ func (s *Server) dispatch(ctx context.Context, req rpcRequest, modern bool) (any
 		return out, nil
 
 	case "tools/call":
-		var p struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		}
+		var p toolCallParams
 		if err := json.Unmarshal(req.Params, &p); err != nil || p.Name == "" {
 			return nil, &rpcError{Code: -32602, Message: "invalid tools/call parameters"}
 		}
@@ -305,7 +318,7 @@ func (s *Server) dispatch(ctx context.Context, req rpcRequest, modern bool) (any
 			return nil, &rpcError{Code: -32602, Message: "unknown tool: " + p.Name}
 		}
 		s.toolCalls.Add(1)
-		value, err := s.Registry.Call(ctx, p.Name, p.Arguments)
+		value, err := s.Registry.Call(ctx, p.Name, s.compatibleArguments(p))
 		if err != nil {
 			s.toolErrs.Add(1)
 			out := map[string]any{
@@ -348,6 +361,48 @@ func (s *Server) dispatch(ctx context.Context, req rpcRequest, modern bool) (any
 	default:
 		return nil, &rpcError{Code: -32601, Message: "method not found: " + req.Method}
 	}
+}
+
+// compatibleArguments translates reason values that some MCP clients place
+// beside arguments (or inside params._meta) into the schema-described
+// arguments object. An explicitly supplied argument-level reason always wins:
+// even an invalid value is left intact so Registry.Call rejects it. The
+// fallback is deliberately deterministic and identifies compatibility mode so
+// audit consumers do not mistake it for client-supplied intent.
+func (s *Server) compatibleArguments(p toolCallParams) json.RawMessage {
+	var args map[string]json.RawMessage
+	if len(p.Arguments) == 0 {
+		// MCP permits the arguments member to be omitted. Treat that case as
+		// an empty object so a supplied compatibility reason can still be
+		// translated; an explicit JSON null remains a non-object below.
+		args = map[string]json.RawMessage{}
+	} else if err := json.Unmarshal(p.Arguments, &args); err != nil || args == nil {
+		// Do not turn null, arrays, scalars, or malformed arguments into an
+		// object merely to satisfy the compatibility path.
+		return p.Arguments
+	}
+	if _, exists := args["reason"]; exists {
+		return p.Arguments
+	}
+
+	var supplied json.RawMessage
+	if len(p.Reason) > 0 {
+		supplied = p.Reason
+	} else if p.Meta != nil {
+		supplied = p.Meta["reason"]
+	}
+	if len(supplied) == 0 {
+		if !s.CompatMissingReason || s.Strict {
+			return p.Arguments
+		}
+		supplied = json.RawMessage(`"` + compatibilityReason + `"`)
+	}
+	args["reason"] = supplied
+	encoded, err := json.Marshal(args)
+	if err != nil {
+		return p.Arguments
+	}
+	return encoded
 }
 
 func (s *Server) withMeta(result map[string]any) map[string]any {

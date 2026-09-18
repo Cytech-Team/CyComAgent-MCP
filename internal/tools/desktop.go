@@ -169,6 +169,11 @@ func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 		cmd     string
 		args    []string
 	}
+	// Reaching this path means target=current was selected explicitly (or auto
+	// fell back because no isolated compositor exists). Use the physical-session
+	// environment here; the headless path above is the only implicit AI input
+	// route.
+	inputEnv := desktopEnvironment()
 	var candidates []candidate
 	add := func(adapter, binary string, args ...string) {
 		if p, err := exec.LookPath(binary); err == nil {
@@ -239,7 +244,7 @@ func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 	var failures []string
 	for _, c := range candidates {
-		result, err := runDesktop(ctx, c.adapter, c.cmd, c.args)
+		result, err := runDesktop(ctx, c.adapter, c.cmd, c.args, inputEnv)
 		if err == nil {
 			return result, nil
 		}
@@ -391,11 +396,11 @@ func macOSKeyAppleScript(key string) (string, bool) {
 	return "", false
 }
 
-func runDesktop(ctx context.Context, adapter, cmd string, args []string) (any, error) {
+func runDesktop(ctx context.Context, adapter, cmd string, args []string, env []string) (any, error) {
 	attemptCtx, cancel := context.WithTimeout(ctx, desktopAdapterAttemptTimeout)
 	defer cancel()
 	c := exec.CommandContext(attemptCtx, cmd, args...)
-	c.Env = desktopEnvironment()
+	c.Env = env
 	b, err := c.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("%s failed: %w: %s", adapter, err, strings.TrimSpace(string(b)))

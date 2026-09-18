@@ -127,7 +127,16 @@ func TestAnyAppHelperProcess(t *testing.T) {
 		case "initialize":
 			result = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{}}
 		case "tools/list":
-			result = map[string]any{"tools": []any{map[string]any{"name": "echo", "description": "test helper", "inputSchema": map[string]any{"type": "object"}}}}
+			result = map[string]any{"tools": []any{map[string]any{
+				"name":        "echo",
+				"description": "test helper",
+				"inputSchema": map[string]any{"type": "object"},
+				"outputSchema": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"ready": map[string]any{"type": "boolean"}},
+					"required":   []string{"ready"},
+				},
+			}}}
 		case "tools/call":
 			var params struct {
 				Name      string          `json:"name"`
@@ -181,6 +190,14 @@ func TestAnyAppTransportRoundTrip(t *testing.T) {
 	if err != nil || len(specs) != 1 || specs[0].Name != "echo" {
 		t.Fatalf("discovery: %v, %v", specs, err)
 	}
+	outputSchema, ok := specs[0].OutputSchema["properties"].(map[string]any)
+	if !ok || outputSchema["ready"] == nil {
+		t.Fatalf("discovered output schema missing: %#v", specs[0].OutputSchema)
+	}
+	required, ok := specs[0].OutputSchema["required"].([]any)
+	if !ok || len(required) != 1 || required[0] != "ready" {
+		t.Fatalf("discovered output required schema=%#v", specs[0].OutputSchema["required"])
+	}
 	client := &anyAppClient{binary: binary}
 	defer client.stopLocked()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -209,6 +226,27 @@ func TestAnyAppTransportRoundTrip(t *testing.T) {
 	_, err = client.callTool(ctx, "error", json.RawMessage(`{}`))
 	if err == nil || err.Error() != "expected helper failure" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAnyAppRegistrationPreservesOutputSchema(t *testing.T) {
+	binary := anyAppTestBackend(t)
+	t.Setenv("CYCOM_ANYAPP_BACKEND", binary)
+	r := registry.New()
+	registerAnyApp(r)
+	var tool registry.Tool
+	for _, candidate := range r.List() {
+		if candidate.Name == "anyapp_echo" {
+			tool = candidate
+			break
+		}
+	}
+	if tool.Name == "" {
+		t.Fatal("Any App helper tool was not registered")
+	}
+	properties, ok := tool.OutputSchema["properties"].(map[string]any)
+	if !ok || properties["ready"] == nil {
+		t.Fatalf("registered output schema missing: %#v", tool.OutputSchema)
 	}
 }
 

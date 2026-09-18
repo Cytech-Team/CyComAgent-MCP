@@ -225,6 +225,7 @@ func anyAppContentError(content []map[string]any) string {
 
 func (c *anyAppClient) ensureStartedLocked(ctx context.Context) error {
 	env := desktopEnvironment()
+	env = anyAppIsolatedDesktopEnv(env)
 	sig := anyAppDesktopEnvSignature(env) + "\x00" + anyAppBinaryFingerprint(c.binary)
 	return c.stdioMCPState.ensureStartedLocked(ctx, c.binary, []string{"mcp"}, env, sig, "Any App", "CyComAgent-AnyApp")
 }
@@ -245,11 +246,95 @@ func (c *anyAppClient) rpcLocked(ctx context.Context, method string, params any)
 	return nil, err
 }
 
+func anyAppIsolatedDesktopEnv(env []string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return env
+	}
+	statePath := filepath.Join(home, ".local", "state", "cycom-ai-desktop", "wayland-display")
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		return env
+	}
+	display := strings.TrimSpace(string(data))
+	if display == "" {
+		return env
+	}
+	runtimeDir := fmt.Sprintf("/run/user/%d", os.Getuid())
+	if st, err := os.Stat(filepath.Join(runtimeDir, display)); err != nil || st.Mode()&os.ModeSocket == 0 {
+		return env
+	}
+
+	// Any App's normal Linux fallback may use ydotool, which injects through
+	// /dev/uinput and therefore reaches the user's real libinput seat even when
+	// WAYLAND_DISPLAY points at the isolated headless compositor.  Put a private
+	// ydotool shim first in PATH for the isolated backend only.  The shim talks
+	// to cycom-wlr-pointerd over a private socket and deliberately refuses to
+	// delegate unsupported commands to the real /usr/bin/ydotool.
+	headlessBin := filepath.Join(home, ".local", "lib", "cycomagent", "headless-bin")
+	pathValue := ""
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "PATH=") {
+			pathValue = strings.TrimPrefix(entry, "PATH=")
+			break
+		}
+	}
+	if pathValue == "" {
+		pathValue = os.Getenv("PATH")
+	}
+	if pathValue == "" {
+		pathValue = "/usr/local/sbin:/usr/local/bin:/usr/bin"
+	}
+
+	set := map[string]string{
+		"WAYLAND_DISPLAY":                          display,
+		"XDG_RUNTIME_DIR":                          runtimeDir,
+		"XDG_SESSION_TYPE":                         "wayland",
+		"XDG_CURRENT_DESKTOP":                      "labwc-ai",
+		"XDG_SESSION_DESKTOP":                      "labwc-ai",
+		"DESKTOP_SESSION":                          "labwc-ai",
+		"CYCOM_ANYAPP_ISOLATED":                    "1",
+		"CYCOM_WLR_POINTER_SOCKET":                 filepath.Join(runtimeDir, "cycom-ai-pointer.sock"),
+		"CYCOM_HEADLESS_WIDTH":                     "1280",
+		"CYCOM_HEADLESS_HEIGHT":                    "720",
+		"PATH":                                     headlessBin + ":" + filepath.Join(home, ".local", "bin") + ":" + pathValue,
+		"COMPUTER_USE_LINUX_FORCE_YDOTOOL_POINTER": "1",
+		"CODEX_COMPUTER_USE_FORCE_YDOTOOL_POINTER": "1",
+		"CU_DISABLE_ABS_POINTER":                   "1",
+		"CODEX_COMPUTER_USE_DISABLE_ABS_POINTER":   "1",
+	}
+	out := make([]string, 0, len(env)+len(set))
+	seen := map[string]bool{}
+	for _, entry := range env {
+		i := strings.IndexByte(entry, '=')
+		if i <= 0 {
+			continue
+		}
+		key := entry[:i]
+		if key == "DISPLAY" {
+			continue
+		}
+		if value, ok := set[key]; ok {
+			out = append(out, key+"="+value)
+			seen[key] = true
+		} else {
+			out = append(out, entry)
+		}
+	}
+	for key, value := range set {
+		if !seen[key] {
+			out = append(out, key+"="+value)
+		}
+	}
+	return out
+}
+
 func anyAppDesktopEnvSignature(env []string) string {
 	wanted := map[string]bool{
 		"DISPLAY": true, "WAYLAND_DISPLAY": true, "XDG_RUNTIME_DIR": true,
 		"DBUS_SESSION_BUS_ADDRESS": true, "XAUTHORITY": true,
 		"XDG_CURRENT_DESKTOP": true, "XDG_SESSION_TYPE": true,
+		"CYCOM_ANYAPP_ISOLATED": true, "CYCOM_WLR_POINTER_SOCKET": true, "PATH": true,
 	}
 	values := make([]string, 0, len(wanted))
 	for _, entry := range env {

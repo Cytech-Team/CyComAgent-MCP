@@ -21,11 +21,20 @@ type Event struct {
 	DurationMS int64     `json:"duration_ms"`
 	OK         bool      `json:"ok"`
 	Error      string    `json:"error,omitempty"`
+	Reason     string    `json:"reason,omitempty"`
+}
+
+type ActiveCall struct {
+	ID     string    `json:"id"`
+	Time   time.Time `json:"time"`
+	Tool   string    `json:"tool"`
+	Reason string    `json:"reason,omitempty"`
 }
 
 type Logger struct {
-	dir string
-	mu  sync.Mutex
+	dir    string
+	mu     sync.Mutex
+	active map[string]ActiveCall
 }
 
 func New(stateDir string) (*Logger, error) {
@@ -33,19 +42,42 @@ func New(stateDir string) (*Logger, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	return &Logger{dir: dir}, nil
+	return &Logger{dir: dir, active: make(map[string]ActiveCall)}, nil
 }
 
-func (l *Logger) BeforeCall(context.Context, string, json.RawMessage) error { return nil }
+func callID(tool string, args json.RawMessage) string {
+	sum := sha256.Sum256(append(append([]byte(tool), 0), args...))
+	return hex.EncodeToString(sum[:])
+}
+
+func callReason(args json.RawMessage) string {
+	var obj map[string]any
+	_ = json.Unmarshal(args, &obj)
+	reason, _ := obj["reason"].(string)
+	return reason
+}
+
+func (l *Logger) BeforeCall(_ context.Context, tool string, args json.RawMessage) error {
+	call := ActiveCall{ID: callID(tool, args), Time: time.Now().UTC(), Tool: tool, Reason: callReason(args)}
+	l.mu.Lock()
+	l.active[call.ID] = call
+	l.mu.Unlock()
+	return nil
+}
 
 func (l *Logger) AfterCall(_ context.Context, tool string, args json.RawMessage, d time.Duration, callErr error) {
 	sum := sha256.Sum256(args)
+	reason := callReason(args)
+	l.mu.Lock()
+	delete(l.active, callID(tool, args))
+	l.mu.Unlock()
 	ev := Event{
 		Time:       time.Now().UTC(),
 		Tool:       tool,
 		ArgsSHA256: hex.EncodeToString(sum[:]),
 		DurationMS: d.Milliseconds(),
 		OK:         callErr == nil,
+		Reason:     reason,
 	}
 	if callErr != nil {
 		ev.Error = callErr.Error()
@@ -64,6 +96,17 @@ func (l *Logger) append(ev Event) error {
 	defer f.Close()
 	enc := json.NewEncoder(f)
 	return enc.Encode(ev)
+}
+
+func (l *Logger) Active() []ActiveCall {
+	l.mu.Lock()
+	out := make([]ActiveCall, 0, len(l.active))
+	for _, call := range l.active {
+		out = append(out, call)
+	}
+	l.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].Time.Before(out[j].Time) })
+	return out
 }
 
 func (l *Logger) Tail(limit int) ([]Event, error) {

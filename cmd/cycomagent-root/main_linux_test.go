@@ -7,6 +7,13 @@ import (
 	"testing"
 )
 
+func TestNormalizeProcExeAfterAtomicUpgrade(t *testing.T) {
+	got := normalizeProcExe("/usr/local/bin/cycomagent (deleted)")
+	if got != "/usr/local/bin/cycomagent" {
+		t.Fatalf("unexpected normalized path: %q", got)
+	}
+}
+
 func TestPeerExecutableAllowedForSelf(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {

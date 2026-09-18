@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -190,6 +191,13 @@ func peerExecutableAllowed(pid int, allowed string) bool {
 	if err != nil {
 		return false
 	}
+	// Linux keeps a process attached to the old inode when its executable is
+	// atomically replaced and exposes that fact as " (deleted)" in /proc/PID/exe.
+	// Comparing that stale inode to the newly installed path would lock the
+	// running CyComAgent out of its root broker during a safe binary update.
+	// Accept the configured pathname in that case; SO_PEERCRED UID/PID is still
+	// checked independently before this function is reached.
+	actual = normalizeProcExe(actual)
 	want, err := filepath.EvalSymlinks(allowed)
 	if err != nil {
 		want = filepath.Clean(allowed)
@@ -199,6 +207,10 @@ func peerExecutableAllowed(pid int, allowed string) bool {
 		got = filepath.Clean(actual)
 	}
 	return got == want
+}
+
+func normalizeProcExe(path string) string {
+	return strings.TrimSuffix(path, " (deleted)")
 }
 
 func mergeEnv(extra map[string]string) []string {

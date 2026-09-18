@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "CyCom Browser Bridge",
+  "version": "0.1.0",
+  "description": "Semantic browser control bridge for CyComAgent.",
+  "permissions": ["tabs", "scripting", "activeTab", "debugger"],
+  "host_permissions": ["<all_urls>"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "content_security_policy": {"extension_pages": "default-src 'self'; connect-src 'self' ws://127.0.0.1:17373 http://127.0.0.1:17373;"},
+  "action": {"default_title": "CyCom Browser Bridge"}
+}

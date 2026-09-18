@@ -51,15 +51,15 @@ for tool in assistant_device_status assistant_listen assistant_speak assistant_n
 done
 
 echo '[3/5] local shell works without /bin/sh assumption'
-post tools/call process_exec "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"process_exec\",\"arguments\":{\"command\":\"printf termux-shell-ok\"},${META}}}" > "$TMPDIR/cycomagent-termux-exec.json"
+post tools/call process_exec "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"process_exec\",\"arguments\":{\"command\":\"printf termux-shell-ok\",\"reason\":\"verify Termux shell execution\"},${META}}}" > "$TMPDIR/cycomagent-termux-exec.json"
 grep -q 'termux-shell-ok' "$TMPDIR/cycomagent-termux-exec.json"
 
 echo '[4/5] Android device-root path is blocked'
-post tools/call process_exec "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"process_exec\",\"arguments\":{\"command\":\"id\",\"privileged\":true},${META}}}" > "$TMPDIR/cycomagent-termux-root.json" || true
+post tools/call process_exec "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"process_exec\",\"arguments\":{\"command\":\"id\",\"privileged\":true,\"reason\":\"verify Termux privileged path is blocked\"},${META}}}" > "$TMPDIR/cycomagent-termux-root.json" || true
 grep -q 'device-root escalation is not supported' "$TMPDIR/cycomagent-termux-root.json"
 
 echo '[5/5] sensitive Android defaults to opt-in'
-post tools/call assistant_sms_send "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"assistant_sms_send\",\"arguments\":{\"numbers\":[\"000\"],\"text\":\"smoke\"},${META}}}" > "$TMPDIR/cycomagent-termux-sensitive.json" || true
+post tools/call assistant_sms_send "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"assistant_sms_send\",\"arguments\":{\"numbers\":[\"000\"],\"text\":\"smoke\",\"reason\":\"verify sensitive Android capability remains opt-in\"},${META}}}" > "$TMPDIR/cycomagent-termux-sensitive.json" || true
 grep -q 'allow_sensitive_android=true' "$TMPDIR/cycomagent-termux-sensitive.json"
 
 printf '%s\n' "Termux mobile_assistant smoke test passed." "Log: $LOG"

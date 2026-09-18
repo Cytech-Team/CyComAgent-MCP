@@ -29,22 +29,22 @@ grep -q 'audit_tail' /tmp/cycom-smoke-tools.json
 echo 'tool catalog contains full-power primitives'
 
 echo '[4/9] process_exec with stdin'
-post tools/call process_exec "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"process_exec\",\"arguments\":{\"command\":\"cat\",\"stdin\":\"cycom-stdin-ok\"},${meta}}}" | tee /tmp/cycom-smoke-exec.json; echo
+post tools/call process_exec "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"process_exec\",\"arguments\":{\"command\":\"cat\",\"stdin\":\"cycom-stdin-ok\",\"reason\":\"verify process execution with stdin\"},${meta}}}" | tee /tmp/cycom-smoke-exec.json; echo
 grep -q 'cycom-stdin-ok' /tmp/cycom-smoke-exec.json
 
 echo '[5/9] target_exec local stateless route'
-post tools/call target_exec "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"target_exec\",\"arguments\":{\"name\":\"local\",\"command\":\"printf cycom-target-ok\"},${meta}}}" | tee /tmp/cycom-smoke-target.json; echo
+post tools/call target_exec "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"target_exec\",\"arguments\":{\"name\":\"local\",\"command\":\"printf cycom-target-ok\",\"reason\":\"verify local target execution\"},${meta}}}" | tee /tmp/cycom-smoke-target.json; echo
 grep -q 'cycom-target-ok' /tmp/cycom-smoke-target.json
 
 echo '[6/9] durable explicit state round trip'
-post tools/call state_put "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"state_put\",\"arguments\":{\"namespace\":\"smoke\",\"key\":\"roundtrip\",\"value\":{\"ok\":true}},${meta}}}" >/dev/null
-post tools/call state_get "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"state_get\",\"arguments\":{\"namespace\":\"smoke\",\"key\":\"roundtrip\"},${meta}}}" | tee /tmp/cycom-smoke-state.json; echo
+post tools/call state_put "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"state_put\",\"arguments\":{\"namespace\":\"smoke\",\"key\":\"roundtrip\",\"value\":{\"ok\":true},\"reason\":\"store smoke-test roundtrip state\"},${meta}}}" >/dev/null
+post tools/call state_get "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"state_get\",\"arguments\":{\"namespace\":\"smoke\",\"key\":\"roundtrip\",\"reason\":\"read smoke-test roundtrip state\"},${meta}}}" | tee /tmp/cycom-smoke-state.json; echo
 grep -q '"ok":true' /tmp/cycom-smoke-state.json
 
 echo '[7/9] policy and audit'
-post tools/call policy_get "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\",\"params\":{\"name\":\"policy_get\",\"arguments\":{},${meta}}}" | tee /tmp/cycom-smoke-policy.json >/dev/null
+post tools/call policy_get "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\",\"params\":{\"name\":\"policy_get\",\"arguments\":{\"reason\":\"inspect active smoke-test policy\"},${meta}}}" | tee /tmp/cycom-smoke-policy.json >/dev/null
 grep -q '"mode":"full"' /tmp/cycom-smoke-policy.json
-post tools/call audit_tail "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",\"params\":{\"name\":\"audit_tail\",\"arguments\":{\"limit\":20},${meta}}}" | tee /tmp/cycom-smoke-audit.json >/dev/null
+post tools/call audit_tail "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/call\",\"params\":{\"name\":\"audit_tail\",\"arguments\":{\"limit\":20,\"reason\":\"inspect smoke-test audit events\"},${meta}}}" | tee /tmp/cycom-smoke-audit.json >/dev/null
 grep -q 'process_exec' /tmp/cycom-smoke-audit.json
 echo 'policy/audit ok'
 

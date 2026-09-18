@@ -103,16 +103,18 @@ func New(cfg Config) (*Runtime, error) {
 		}
 		_ = loaded
 	}
-	srv := &mcpserver.Server{Name: "CyComAgent-MCP", Version: cfg.Version, Instructions: cfg.Instructions, Registry: reg, Strict: cfg.StrictMCP}
+	srv := &mcpserver.Server{Name: "CyComAgent-MCP", Version: cfg.Version, Instructions: cfg.Instructions, Registry: reg, Strict: cfg.StrictMCP, CompatMissingReason: true}
 	rt := &Runtime{cfg: cfg, started: time.Now(), server: srv, registry: reg, state: st, jobs: jm, plugins: pm, targets: tm, policy: pe, audit: al}
 	_ = st.Put("runtime", "identity", map[string]any{"name": "CyComAgent-MCP", "version": cfg.Version, "started_at": rt.started.UTC()})
 	return rt, nil
 }
 
-func (r *Runtime) MCP() *mcpserver.Server       { return r.server }
-func (r *Runtime) Version() string              { return r.cfg.Version }
-func (r *Runtime) Registry() *registry.Registry { return r.registry }
-func (r *Runtime) StateDir() string             { return r.cfg.StateDir }
+func (r *Runtime) MCP() *mcpserver.Server                     { return r.server }
+func (r *Runtime) Version() string                            { return r.cfg.Version }
+func (r *Runtime) Registry() *registry.Registry               { return r.registry }
+func (r *Runtime) StateDir() string                           { return r.cfg.StateDir }
+func (r *Runtime) AuditTail(limit int) ([]audit.Event, error) { return r.audit.Tail(limit) }
+func (r *Runtime) AuditActive() []audit.ActiveCall            { return r.audit.Active() }
 
 func (r *Runtime) Livez(w http.ResponseWriter, _ *http.Request) {
 	r.healthReq.Add(1)

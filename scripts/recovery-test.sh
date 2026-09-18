@@ -45,7 +45,7 @@ call_tool() {
 }
 
 start_runtime
-SPAWN="$(call_tool process_spawn '{"command":"sleep 2; printf recovered-done"}' 1)"
+SPAWN="$(call_tool process_spawn '{"command":"sleep 2; printf recovered-done","reason":"start a recoverable background job"}' 1)"
 JOB_ID="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read())["result"]["structuredContent"]["id"])' <<<"$SPAWN")"
 echo "spawned $JOB_ID; killing runtime pid=$PID while job stays alive"
 kill -KILL "$PID"
@@ -56,8 +56,8 @@ sleep .15
 start_runtime
 echo "runtime restarted pid=$PID; waiting for recovered job"
 sleep 2.5
-GET="$(call_tool job_get "{\"id\":\"$JOB_ID\"}" 2)"
-TAIL="$(call_tool job_tail "{\"id\":\"$JOB_ID\",\"lines\":20}" 3)"
+GET="$(call_tool job_get "{\"id\":\"$JOB_ID\",\"reason\":\"inspect recovered job status\"}" 2)"
+TAIL="$(call_tool job_tail "{\"id\":\"$JOB_ID\",\"lines\":20,\"reason\":\"inspect recovered job output\"}" 3)"
 
 python3 - "$GET" "$TAIL" <<'PY'
 import json, sys
