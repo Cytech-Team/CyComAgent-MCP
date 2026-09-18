@@ -31,7 +31,7 @@ func registerDesktop(r *registry.Registry, stateDir string) {
 		Name: "desktop_input", Description: "Send generic desktop input using the best available adapter. Supports text, key, click and mouse_move actions.",
 		InputSchema: registry.ObjectSchema(map[string]any{
 			"action": map[string]any{"type": "string", "enum": []string{"text", "key", "click", "mouse_move"}},
-			"target": map[string]any{"type": "string", "enum": []string{"current", "headless", "auto"}, "description": "desktop target; headless routes to the isolated CyCom AI compositor without sharing physical input"},
+			"target": map[string]any{"type": "string", "enum": []string{"current", "headless", "auto"}, "description": "desktop target; default auto prefers the isolated CyCom AI compositor when available; current must be explicit to control the physical desktop"},
 			"text":   registry.String("text to type"),
 			"key":    registry.String("key or key chord, adapter-specific names accepted"),
 			"button": registry.Integer("mouse button; 1=left, 2=middle, 3=right"),
@@ -148,12 +148,19 @@ func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 
 	if in.Target == "" {
-		in.Target = "current"
+		in.Target = "auto"
+	}
+	if in.Target == "auto" {
+		if _, _, err := cycomHeadlessEnvironment(); err == nil {
+			in.Target = "headless"
+		} else {
+			in.Target = "current"
+		}
 	}
 	if in.Target == "headless" {
 		return desktopInputHeadless(ctx, in.Action, in.Text, in.Key, in.Button, in.X, in.Y)
 	}
-	if in.Target != "current" && in.Target != "auto" {
+	if in.Target != "current" {
 		return nil, fmt.Errorf("unsupported desktop target %q", in.Target)
 	}
 
