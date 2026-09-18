@@ -1,7 +1,7 @@
 BINARY := cycomagent
-VERSION ?= 0.4.7-session-routing-dev
+VERSION ?= $(shell cat internal/buildinfo/VERSION)
 GO ?= go
-LDFLAGS := -s -w -X main.version=$(VERSION)
+LDFLAGS := -s -w
 STAGE := .release/CyComAgent-MCP
 TERMUX_STAGE := .release-termux/CyComAgent-MCP
 MACOS_STAGE := .release-macos/CyComAgent-MCP

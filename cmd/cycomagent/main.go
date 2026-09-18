@@ -15,12 +15,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/buildinfo"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/platform"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/runtime"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/sessionbridge"
 )
-
-var version = "0.4.8-isolated-desktop-dev"
 
 func main() {
 	mode := flag.String("mode", envOr("CYCOM_MODE", "http"), "transport: http or stdio")
@@ -36,7 +35,7 @@ func main() {
 	showVer := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *showVer {
-		fmt.Println(version)
+		fmt.Println(buildinfo.FullVersion())
 		return
 	}
 	if *sessionBridge {
@@ -62,7 +61,7 @@ func main() {
 	} else if goruntime.GOOS == "linux" {
 		instructions = "CyComAgent is running in Linux computer_runtime mode. When anyapp_* tools are available, prefer anyapp_get_app_state plus semantic/window-targeted anyapp actions for GUI work; use desktop_capture/desktop_input as generic fallback tools. For process_exec/process_spawn, use execution_context=desktop when launching GUI apps or commands that need the active login session (Polkit, notifications, portals, keyrings, clipboard/compositor access); use service for daemon/headless work. Use structured filesystem/process/service/network tools for non-GUI operations."
 	}
-	rt, err := runtime.New(runtime.Config{Version: version, StateDir: *stateDir, PluginDir: *pluginDir, RootSocket: *rootSocket, StrictMCP: *strict, Instructions: instructions})
+	rt, err := runtime.New(runtime.Config{Version: buildinfo.FullVersion(), StateDir: *stateDir, PluginDir: *pluginDir, RootSocket: *rootSocket, StrictMCP: *strict, Instructions: instructions})
 	if err != nil {
 		log.Fatal(err)
 	}
