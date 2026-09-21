@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	internalruntime "github.com/Cytech-Team/CyComAgent-MCP/internal/runtime"
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/registry"
 )
 
 type Config struct {
@@ -17,6 +18,8 @@ type Config struct {
 	Instructions string
 }
 
+type Handler func(context.Context, json.RawMessage) (any, error)
+
 type Tool struct {
 	Name         string         `json:"name"`
 	Title        string         `json:"title,omitempty"`
@@ -25,6 +28,7 @@ type Tool struct {
 	OutputSchema map[string]any `json:"outputSchema,omitempty"`
 	Annotations  map[string]any `json:"annotations,omitempty"`
 	Source       string         `json:"source,omitempty"`
+	Handler      Handler        `json:"-"`
 }
 
 type Runtime struct {
@@ -82,4 +86,28 @@ func (r *Runtime) ListTools() []Tool {
 
 func (r *Runtime) Call(ctx context.Context, name string, args json.RawMessage) (any, error) {
 	return r.inner.Registry().Call(ctx, name, args)
+}
+
+
+func (r *Runtime) RegisterTool(tool Tool) error {
+	if r == nil || r.inner == nil {
+		return context.Canceled
+	}
+	return r.inner.Registry().Upsert(registry.Tool{
+		Name:         tool.Name,
+		Title:        tool.Title,
+		Description:  tool.Description,
+		InputSchema:  tool.InputSchema,
+		OutputSchema: tool.OutputSchema,
+		Annotations:  tool.Annotations,
+		Source:       tool.Source,
+		Handler:      registry.Handler(tool.Handler),
+	})
+}
+
+func (r *Runtime) RemoveSource(source string) {
+	if r == nil || r.inner == nil || source == "" {
+		return
+	}
+	r.inner.Registry().RemoveSource(source)
 }
