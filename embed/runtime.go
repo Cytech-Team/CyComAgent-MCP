@@ -4,9 +4,10 @@ package embed
 import (
 	"context"
 	"encoding/json"
+	"time"
 
-	internalruntime "github.com/Cytech-Team/CyComAgent-MCP/internal/runtime"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/registry"
+	internalruntime "github.com/Cytech-Team/CyComAgent-MCP/internal/runtime"
 )
 
 type Config struct {
@@ -19,6 +20,11 @@ type Config struct {
 }
 
 type Handler func(context.Context, json.RawMessage) (any, error)
+
+type Interceptor interface {
+	BeforeCall(context.Context, string, json.RawMessage) error
+	AfterCall(context.Context, string, json.RawMessage, time.Duration, error)
+}
 
 type Tool struct {
 	Name         string         `json:"name"`
@@ -88,7 +94,6 @@ func (r *Runtime) Call(ctx context.Context, name string, args json.RawMessage) (
 	return r.inner.Registry().Call(ctx, name, args)
 }
 
-
 func (r *Runtime) RegisterTool(tool Tool) error {
 	if r == nil || r.inner == nil {
 		return context.Canceled
@@ -110,4 +115,11 @@ func (r *Runtime) RemoveSource(source string) {
 		return
 	}
 	r.inner.Registry().RemoveSource(source)
+}
+
+func (r *Runtime) AddInterceptor(interceptor Interceptor) {
+	if r == nil || r.inner == nil || interceptor == nil {
+		return
+	}
+	r.inner.Registry().AddInterceptor(interceptor)
 }
