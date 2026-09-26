@@ -11,12 +11,13 @@ import (
 )
 
 type Config struct {
-	Version      string
-	StateDir     string
-	PluginDir    string
-	RootSocket   string
-	StrictMCP    bool
-	Instructions string
+	Version       string
+	StateDir      string
+	PluginDir     string
+	RootSocket    string
+	StrictMCP     bool
+	DirectSession bool
+	Instructions  string
 }
 
 type Handler func(context.Context, json.RawMessage) (any, error)
@@ -43,12 +44,13 @@ type Runtime struct {
 
 func New(cfg Config) (*Runtime, error) {
 	rt, err := internalruntime.New(internalruntime.Config{
-		Version:      cfg.Version,
-		StateDir:     cfg.StateDir,
-		PluginDir:    cfg.PluginDir,
-		RootSocket:   cfg.RootSocket,
-		StrictMCP:    cfg.StrictMCP,
-		Instructions: cfg.Instructions,
+		Version:       cfg.Version,
+		StateDir:      cfg.StateDir,
+		PluginDir:     cfg.PluginDir,
+		RootSocket:    cfg.RootSocket,
+		StrictMCP:     cfg.StrictMCP,
+		DirectSession: cfg.DirectSession,
+		Instructions:  cfg.Instructions,
 	})
 	if err != nil {
 		return nil, err

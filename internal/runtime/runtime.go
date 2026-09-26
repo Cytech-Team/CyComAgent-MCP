@@ -26,12 +26,13 @@ import (
 )
 
 type Config struct {
-	Version      string
-	StateDir     string
-	PluginDir    string
-	RootSocket   string
-	StrictMCP    bool
-	Instructions string
+	Version       string
+	StateDir      string
+	PluginDir     string
+	RootSocket    string
+	StrictMCP     bool
+	DirectSession bool
+	Instructions  string
 }
 
 type Runtime struct {
@@ -95,6 +96,9 @@ func New(cfg Config) (*Runtime, error) {
 	reg.AddInterceptor(al)
 	root := broker.Client{Socket: cfg.RootSocket}
 	session := sessionbridge.NewClient("")
+	if cfg.DirectSession {
+		session = sessionbridge.NewDirectClient()
+	}
 	tools.Register(reg, tools.Dependencies{Jobs: jm, Broker: root, Plugins: pm, State: st, Targets: tm, Audit: al, Policy: pe, StateDir: cfg.StateDir, Version: cfg.Version, Session: session})
 	if pe.Snapshot().AllowExternalPlugins {
 		loaded, err := pm.LoadInto(reg)

@@ -27,6 +27,7 @@ const (
 
 type Client struct {
 	Socket string
+	Direct bool
 }
 
 func DefaultSocketPath() string {
@@ -46,7 +47,17 @@ func NewClient(socket string) Client {
 	return Client{Socket: socket}
 }
 
+// NewDirectClient executes session-scoped work directly in the caller process.
+// It is intended for an embedded runtime that already lives inside the real
+// graphical login session, such as CyShell.
+func NewDirectClient() Client {
+	return Client{Direct: true}
+}
+
 func (c Client) Available() bool {
+	if c.Direct {
+		return true
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 	_, err := c.Status(ctx)
@@ -54,6 +65,11 @@ func (c Client) Available() bool {
 }
 
 func (c Client) Status(ctx context.Context) (Status, error) {
+	if c.Direct {
+		status := bridgeStatus("")
+		status.Available = true
+		return status, nil
+	}
 	var out response
 	if err := c.call(ctx, request{Action: "status"}, &out); err != nil {
 		return Status{Available: false, Socket: c.socketPath()}, err
@@ -66,6 +82,9 @@ func (c Client) Status(ctx context.Context) (Status, error) {
 }
 
 func (c Client) Exec(ctx context.Context, in ExecRequest) (ExecResult, error) {
+	if c.Direct {
+		return runExecWithContext(ctx, in)
+	}
 	var out response
 	if err := c.call(ctx, request{Action: "exec", Exec: &in}, &out); err != nil {
 		return ExecResult{}, err
@@ -77,6 +96,9 @@ func (c Client) Exec(ctx context.Context, in ExecRequest) (ExecResult, error) {
 }
 
 func (c Client) Spawn(ctx context.Context, in SpawnRequest) (SpawnResult, error) {
+	if c.Direct {
+		return runSpawn(in)
+	}
 	var out response
 	if err := c.call(ctx, request{Action: "spawn", Spawn: &in}, &out); err != nil {
 		return SpawnResult{}, err
@@ -293,6 +315,10 @@ func bridgeStatus(socket string) Status {
 }
 
 func runExec(in ExecRequest) (ExecResult, error) {
+	return runExecWithContext(context.Background(), in)
+}
+
+func runExecWithContext(parent context.Context, in ExecRequest) (ExecResult, error) {
 	if strings.TrimSpace(in.Command) == "" {
 		return ExecResult{}, errors.New("command is required")
 	}
@@ -308,7 +334,7 @@ func runExec(in ExecRequest) (ExecResult, error) {
 	if shell == "" {
 		shell = defaultShell()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.Command(shell, "-lc", in.Command)
 	if in.Cwd != "" {

@@ -12,6 +12,7 @@ import (
 
 type Client struct {
 	Socket string
+	Direct bool
 }
 
 func DefaultSocketPath() string {
@@ -22,6 +23,7 @@ func DefaultSocketPath() string {
 }
 
 func NewClient(socket string) Client { return Client{Socket: socket} }
+func NewDirectClient() Client        { return Client{Direct: true} }
 func (Client) Available() bool       { return false }
 func (Client) Status(context.Context) (Status, error) {
 	return Status{Available: false}, fmt.Errorf("desktop session bridge is currently Linux-only")
