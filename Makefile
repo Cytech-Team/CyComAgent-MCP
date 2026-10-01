@@ -47,9 +47,10 @@ release: test vet build
 release-termux: test vet build-termux build-termux-tunnel
 	rm -rf .release-termux
 	mkdir -p $(TERMUX_STAGE)/dist $(TERMUX_STAGE)/scripts $(TERMUX_STAGE)/packaging
-	cp dist/cycomagent-termux-arm64 dist/tunnel-client-runtime-termux-arm64 dist/TUNNEL_CLIENT_COMMIT $(TERMUX_STAGE)/dist/
+	cp dist/cycomagent-termux-arm64 dist/tunnel-client-runtime-termux-arm64 dist/TUNNEL_CLIENT_COMMIT dist/TUNNEL_CLIENT_UPSTREAM $(TERMUX_STAGE)/dist/
 	cp scripts/install-termux.sh scripts/configure-termux.sh scripts/install-termux-boot.sh scripts/smoke-termux.sh $(TERMUX_STAGE)/scripts/
 	cp -a packaging/termux $(TERMUX_STAGE)/packaging/
+	cp -a nea $(TERMUX_STAGE)/
 	cp README.md LICENSE SECURITY.md CHANGELOG.md THIRD_PARTY.md $(RELEASE_NOTES) $(TERMUX_STAGE)/
 	tar -C .release-termux -czf dist/CyComAgent-MCP-v$(VERSION)-termux-arm64.tar.gz CyComAgent-MCP
 	sha256sum dist/cycomagent-termux-arm64 dist/tunnel-client-runtime-termux-arm64 dist/CyComAgent-MCP-v$(VERSION)-termux-arm64.tar.gz > dist/SHA256SUMS-termux

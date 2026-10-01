@@ -21,8 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Parse POSIX bootstrap scripts
-        run: sh -n scripts/bootstrap.sh scripts/bootstrap-termux.sh scripts/install-launchd.sh
+      - name: Parse POSIX bootstrap and NEA scripts
+        run: sh -n scripts/bootstrap.sh scripts/bootstrap-termux.sh scripts/install-launchd.sh scripts/nea-apply.sh scripts/build-termux-tunnel.sh scripts/nea-publish-termux-tunnel.sh
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
@@ -39,7 +39,9 @@ jobs:
         with:
           go-version: '1.25.x'
       - run: make build-termux
-      - run: file dist/cycomagent-termux-arm64
+      - run: TUNNEL_CLIENT_REF=v0.0.15 make build-termux-tunnel
+      - run: file dist/cycomagent-termux-arm64 dist/tunnel-client-runtime-termux-arm64
+      - run: grep -q '^nea_profile=termux-arm64/tunnel-client$' dist/TUNNEL_CLIENT_UPSTREAM
       - uses: actions/upload-artifact@v4
         with:
           name: cycomagent-termux-arm64

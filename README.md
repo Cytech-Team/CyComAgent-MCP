@@ -258,7 +258,9 @@ Windows 10/11 uses the same curl-based flow but pipes into Windows PowerShell be
 curl.exe -fsSL https://cdn.cytechteam.site/install/cycomagent.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command -
 ```
 
-Each bootstrap downloads an immutable GitHub Release asset and validates its published SHA-256 checksum before installation. Windows may show a UAC prompt because the bridge is installed as a SYSTEM startup task. macOS installs as a user LaunchAgent and may later request normal Screen Recording, Accessibility, or Automation permissions when desktop capabilities are used.
+The POSIX bootstrap now follows upstream automatically: it selects the newest published release that still contains the full installer package for the detected platform, verifies that immutable asset with its published SHA-256 file, then upgrades the runtime to the newest compatible `SHA256SUMS-sync` binary release when one exists. Android/Termux also layers the current **NEA** machine adaptation for the tunnel runtime after checksum verification. Set `CYCOM_AUTO_UPSTREAM=0` to keep only the packaged release, or `CYCOM_RELEASE_TAG=v...` to pin release discovery. Windows may show a UAC prompt because the bridge is installed as a SYSTEM startup task. macOS installs as a user LaunchAgent and may later request normal Screen Recording, Accessibility, or Automation permissions when desktop capabilities are used.
+
+Machine-specific source adaptations are cataloged under [`nea/`](nea/) instead of being embedded as one-off edits inside build scripts. This keeps upstream updates and local compatibility fixes independently reviewable.
 
 ## Build
 

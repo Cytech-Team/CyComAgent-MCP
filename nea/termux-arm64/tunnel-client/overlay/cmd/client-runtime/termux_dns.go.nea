@@ -1,0 +1,66 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"net"
+	"os"
+	"strings"
+	"time"
+)
+
+func init() {
+	servers := termuxDNSServers()
+	if len(servers) == 0 {
+		servers = []string{"1.1.1.1:53", "1.0.0.1:53", "8.8.8.8:53"}
+	}
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var last error
+			for _, server := range servers {
+				d := net.Dialer{Timeout: 3 * time.Second}
+				conn, err := d.DialContext(ctx, network, server)
+				if err == nil {
+					return conn, nil
+				}
+				last = err
+			}
+			if last == nil {
+				last = errors.New("no DNS servers configured")
+			}
+			return nil, last
+		},
+	}
+}
+
+func termuxDNSServers() []string {
+	prefix := strings.TrimSpace(os.Getenv("PREFIX"))
+	if prefix == "" {
+		prefix = "/data/data/com.termux/files/usr"
+	}
+	f, err := os.Open(prefix + "/etc/resolv.conf")
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var out []string
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		fields := strings.Fields(s.Text())
+		if len(fields) < 2 || fields[0] != "nameserver" {
+			continue
+		}
+		ip := net.ParseIP(strings.TrimSpace(fields[1]))
+		if ip == nil {
+			continue
+		}
+		out = append(out, net.JoinHostPort(ip.String(), "53"))
+		if len(out) >= 3 {
+			break
+		}
+	}
+	return out
+}
