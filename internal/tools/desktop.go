@@ -20,10 +20,16 @@ import (
 )
 
 func registerDesktop(r *registry.Registry, stateDir string) {
+	targetSchema := map[string]any{
+		"type":        "string",
+		"enum":        []string{"auto", "agent_workspace", "current"},
+		"description": "desktop target; auto requires the isolated Agent Workspace and fails if unavailable, agent_workspace forces it, and current explicitly selects the physical desktop; set CYCOM_AGENT_WORKSPACE_AUTO=0 to opt out of auto isolation",
+	}
 	must(r.Add(registry.Tool{
-		Name: "desktop_capture", Description: "Capture the current desktop using an available local screenshot adapter. Returns native MCP image content plus the saved local path.",
+		Name: "desktop_capture", Description: "Capture the selected desktop using an available local screenshot adapter. Returns native MCP image content plus the saved local path.",
 		InputSchema: registry.ObjectSchema(map[string]any{
 			"output_path": registry.String("optional PNG output path; defaults under the runtime state directory"),
+			"target":      targetSchema,
 		}, nil), Source: "core", Annotations: map[string]any{"readOnlyHint": true},
 		Handler: func(ctx context.Context, raw json.RawMessage) (any, error) { return desktopCapture(ctx, raw, stateDir) },
 	}))
@@ -31,7 +37,7 @@ func registerDesktop(r *registry.Registry, stateDir string) {
 		Name: "desktop_input", Description: "Send generic desktop input using the best available adapter. Supports text, key, click and mouse_move actions.",
 		InputSchema: registry.ObjectSchema(map[string]any{
 			"action": map[string]any{"type": "string", "enum": []string{"text", "key", "click", "mouse_move"}},
-			"target": map[string]any{"type": "string", "enum": []string{"current", "headless", "auto"}, "description": "desktop target; default auto prefers the isolated CyCom AI compositor when available; current must be explicit to control the physical desktop"},
+			"target": targetSchema,
 			"text":   registry.String("text to type"),
 			"key":    registry.String("key or key chord, adapter-specific names accepted"),
 			"button": registry.Integer("mouse button; 1=left, 2=middle, 3=right"),
@@ -44,8 +50,13 @@ func registerDesktop(r *registry.Registry, stateDir string) {
 func desktopCapture(ctx context.Context, raw json.RawMessage, stateDir string) (any, error) {
 	var in struct {
 		OutputPath string `json:"output_path"`
+		Target     string `json:"target"`
 	}
 	if err := decode(raw, &in); err != nil {
+		return nil, err
+	}
+	target, env, workspaceDisplay, workspace, err := resolveDesktopTarget(in.Target)
+	if err != nil {
 		return nil, err
 	}
 	path := in.OutputPath
@@ -56,7 +67,8 @@ func desktopCapture(ctx context.Context, raw json.RawMessage, stateDir string) (
 		}
 		path = filepath.Join(dir, fmt.Sprintf("desktop-%d.png", time.Now().UnixMilli()))
 	}
-	adapter, failures, err := captureDesktopAdaptive(ctx, path)
+
+	adapter, failures, err := captureDesktopAdaptiveWithEnv(ctx, path, env, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -64,13 +76,49 @@ func desktopCapture(ctx context.Context, raw json.RawMessage, stateDir string) (
 	if err != nil {
 		return nil, err
 	}
+	structured := map[string]any{
+		"path": path, "adapter": adapter, "bytes": len(data), "mime_type": "image/png",
+		"fallback_failures": failures, "target": target, "shared_physical_input": target == "current",
+	}
+	if workspaceDisplay != "" {
+		structured["wayland_display"] = workspaceDisplay
+	}
 	return registry.RichResult{
-		Structured: map[string]any{"path": path, "adapter": adapter, "bytes": len(data), "mime_type": "image/png", "fallback_failures": failures},
+		Structured: structured,
 		Content: []map[string]any{
-			{"type": "text", "text": fmt.Sprintf("Desktop capture via %s (%s)", adapter, path)},
+			{"type": "text", "text": fmt.Sprintf("Desktop capture via %s on %s (%s)", adapter, target, path)},
 			{"type": "image", "data": base64.StdEncoding.EncodeToString(data), "mimeType": "image/png"},
 		},
 	}, nil
+}
+
+func resolveDesktopTarget(requested string) (target string, env []string, display string, workspace bool, err error) {
+	target, err = normalizeDesktopTarget(requested)
+	if err != nil {
+		return "", nil, "", false, err
+	}
+	switch target {
+	case "auto":
+		target, env, display, err = automaticDesktopTarget()
+		if err != nil {
+			return "", nil, "", false, err
+		}
+		workspace = target == "agent_workspace"
+		if !workspace {
+			env = desktopEnvironment()
+		}
+	case "current":
+		env = desktopEnvironment()
+	case "agent_workspace":
+		env, display, err = cycomHeadlessEnvironment()
+		if err != nil {
+			return "", nil, "", false, err
+		}
+		workspace = true
+	default:
+		return "", nil, "", false, fmt.Errorf("unsupported desktop target %q", target)
+	}
+	return target, env, display, workspace, nil
 }
 
 type desktopCommandCandidate struct {
@@ -103,8 +151,24 @@ func screenshotCandidates(path string) []desktopCommandCandidate {
 }
 
 func captureDesktopAdaptive(ctx context.Context, path string) (string, []string, error) {
+	return captureDesktopAdaptiveWithEnv(ctx, path, desktopEnvironment(), false)
+}
+
+func captureDesktopAdaptiveWithEnv(ctx context.Context, path string, env []string, workspace bool) (string, []string, error) {
 	candidates := screenshotCandidates(path)
+	if workspace {
+		filtered := candidates[:0]
+		for _, candidate := range candidates {
+			if candidate.adapter == "grim" {
+				filtered = append(filtered, candidate)
+			}
+		}
+		candidates = filtered
+	}
 	if len(candidates) == 0 {
+		if workspace {
+			return "", nil, fmt.Errorf("Agent Workspace screenshot adapter unavailable: grim is required")
+		}
 		return "", nil, fmt.Errorf("no supported screenshot adapter found")
 	}
 	var failures []string
@@ -112,7 +176,7 @@ func captureDesktopAdaptive(ctx context.Context, path string) (string, []string,
 		_ = os.Remove(path)
 		attemptCtx, cancel := context.WithTimeout(ctx, desktopAdapterAttemptTimeout)
 		cmd := exec.CommandContext(attemptCtx, candidate.cmd, candidate.args...)
-		cmd.Env = desktopEnvironment() // rediscover live session for every attempt
+		cmd.Env = env
 		output, err := cmd.CombinedOutput()
 		cancel()
 		if err == nil {
@@ -147,21 +211,15 @@ func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	if in.Target == "" {
-		in.Target = "auto"
+	target, _, _, _, err := resolveDesktopTarget(in.Target)
+	if err != nil {
+		return nil, err
 	}
-	if in.Target == "auto" {
-		if _, _, err := cycomHeadlessEnvironment(); err == nil {
-			in.Target = "headless"
-		} else {
-			in.Target = "current"
-		}
-	}
-	if in.Target == "headless" {
+	if target == "agent_workspace" {
 		return desktopInputHeadless(ctx, in.Action, in.Text, in.Key, in.Button, in.X, in.Y)
 	}
-	if in.Target != "current" {
-		return nil, fmt.Errorf("unsupported desktop target %q", in.Target)
+	if target != "current" {
+		return nil, fmt.Errorf("unsupported desktop target %q", target)
 	}
 
 	type candidate struct {
@@ -169,10 +227,9 @@ func desktopInput(ctx context.Context, raw json.RawMessage) (any, error) {
 		cmd     string
 		args    []string
 	}
-	// Reaching this path means target=current was selected explicitly (or auto
-	// fell back because no isolated compositor exists). Use the physical-session
-	// environment here; the headless path above is the only implicit AI input
-	// route.
+	// Reaching this path means target=current was selected explicitly, or the
+	// operator opted out of automatic isolation with CYCOM_AGENT_WORKSPACE_AUTO=0.
+	// Use the physical-session environment only in that explicitly opted-out path.
 	inputEnv := desktopEnvironment()
 	var candidates []candidate
 	add := func(adapter, binary string, args ...string) {
@@ -301,7 +358,7 @@ func desktopInputHeadless(ctx context.Context, action, text, key string, button,
 	if runErr != nil {
 		return nil, fmt.Errorf("isolated-wayland failed: %w: %s", runErr, strings.TrimSpace(string(out)))
 	}
-	return map[string]any{"ok": true, "adapter": "isolated-wayland", "target": "headless", "wayland_display": display, "shared_physical_input": false}, nil
+	return map[string]any{"ok": true, "adapter": "isolated-wayland", "target": "agent_workspace", "wayland_display": display, "shared_physical_input": false}, nil
 }
 
 func isolatedInputBinary(name string) (string, error) {
@@ -352,6 +409,10 @@ func cycomHeadlessEnvironment() ([]string, string, error) {
 	envMap["XDG_SESSION_DESKTOP"] = "labwc-ai"
 	envMap["XDG_SESSION_TYPE"] = "wayland"
 	envMap["CYCOM_AI_DESKTOP"] = "1"
+	// The isolated compositor has no private session bus. Point D-Bus clients
+	// at an unreachable address so they cannot fall through to the physical
+	// login bus at /run/user/$UID/bus.
+	envMap["DBUS_SESSION_BUS_ADDRESS"] = isolatedAgentWorkspaceBusAddress
 	delete(envMap, "DISPLAY")
 	return sortedDesktopEnvironment(envMap), display, nil
 }

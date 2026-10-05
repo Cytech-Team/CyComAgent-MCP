@@ -78,6 +78,22 @@ func TestBridgeExecRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRunExecExplicitBusAddressOverridesInheritedSessionBus(t *testing.T) {
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/12345/bus")
+	const workspaceBus = "unix:path=/dev/null"
+	res, err := runExec(ExecRequest{
+		Command: `/bin/printf '%s' "$DBUS_SESSION_BUS_ADDRESS"`,
+		Shell:   "/bin/sh",
+		Env:     map[string]string{"DBUS_SESSION_BUS_ADDRESS": workspaceBus},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ExitCode != 0 || res.Stdout != workspaceBus {
+		t.Fatalf("session bridge child saw inherited physical bus instead of explicit Agent Workspace address: %#v", res)
+	}
+}
+
 func TestBridgeExecTimeoutKillsProcessGroup(t *testing.T) {
 	client, _ := startTestBridge(t)
 	pidFile := filepath.Join(t.TempDir(), "child.pid")

@@ -87,6 +87,31 @@ func TestAnyAppDesktopEnvSignature(t *testing.T) {
 	}
 }
 
+func TestAnyAppIsolatedEnvironmentBlocksPhysicalSessionBus(t *testing.T) {
+	display := fakeHeadlessDesktop(t)
+	t.Setenv("CYCOM_AGENT_WORKSPACE_AUTO", "1")
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/12345/bus")
+	env, err := anyAppIsolatedDesktopEnv([]string{
+		"DISPLAY=:physical", "WAYLAND_DISPLAY=wayland-physical",
+		"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/12345/bus", "PATH=/bin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{}
+	for _, entry := range env {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			values[key] = value
+		}
+	}
+	if values["WAYLAND_DISPLAY"] != display {
+		t.Fatalf("Any App is not routed to Agent Workspace display: %#v", values)
+	}
+	if values["DBUS_SESSION_BUS_ADDRESS"] != isolatedAgentWorkspaceBusAddress {
+		t.Fatalf("physical login D-Bus leaked into Any App Agent Workspace: %#v", values)
+	}
+}
+
 func TestAnyAppBackendPathOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "helper")
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {

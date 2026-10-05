@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -31,7 +32,12 @@ func registerProcess(r *registry.Registry, deps processDeps) {
 	executionContext := map[string]any{
 		"type":        "string",
 		"enum":        []string{"auto", "service", "user", "desktop", "system"},
-		"description": "execution domain; auto conservatively routes recognized desktop/session commands through the active desktop bridge, service stays in the CyComAgent service, user/desktop use the active login-session bridge, and system requires privileged=true/root broker",
+		"description": "execution domain; auto routes recognized desktop/session commands through the active bridge with the Agent Workspace environment by default, service stays in the CyComAgent service, explicit user/desktop retain login-session bridge behavior, and system requires privileged=true/root broker",
+	}
+	desktopTarget := map[string]any{
+		"type":        "string",
+		"enum":        []string{"auto", "agent_workspace", "current"},
+		"description": "desktop target for desktop side effects; auto uses Agent Workspace for automatic desktop commands and input commands, failing closed if unavailable; agent_workspace forces it, current explicitly selects the physical desktop; Agent Workspace blocks the physical session bus, and CYCOM_AGENT_WORKSPACE_AUTO=0 opts out of isolation",
 	}
 	props := map[string]any{
 		"command":           registry.String("shell command to execute"),
@@ -43,8 +49,9 @@ func registerProcess(r *registry.Registry, deps processDeps) {
 		"max_output_bytes":  registry.Integer("cap for stdout and stderr"),
 		"privileged":        registry.Boolean("execute through the optional root broker"),
 		"execution_context": executionContext,
+		"desktop_target":    desktopTarget,
 	}
-	must(r.Add(registry.Tool{Name: "process_exec", Description: "Execute a shell command synchronously. Use execution_context=desktop for GUI apps, Polkit-authorized desktop actions, notifications, keyrings, portals, clipboard/compositor commands, or anything that must belong to the active graphical login session.", InputSchema: registry.ObjectSchema(props, []string{"command"}), Source: "core", Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
+	must(r.Add(registry.Tool{Name: "process_exec", Description: "Execute a shell command synchronously. With execution_context=auto, recognized desktop/session commands run through the isolated Agent Workspace and fail if it is unavailable. D-Bus-dependent actions fail there instead of reaching the physical login bus. Explicit desktop/user keeps active-login-session routing; service stays in the agent service except recognized pointer/keyboard input commands, which remain workspace-isolated by default. Set desktop_target=current only when physical desktop access is intended. Use execution_context=desktop for GUI apps, Polkit-authorized desktop actions, notifications, keyrings, portals, clipboard/compositor commands, or anything that must belong to the active graphical login session.", InputSchema: registry.ObjectSchema(props, []string{"command"}), Source: "core", Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
 		return processExec(ctx, raw, deps.Broker, deps.Session)
 	}}))
 	must(r.Add(registry.Tool{Name: "process_spawn", Description: "Start a persistent background job. Use execution_context=desktop for GUI/session applications so they are born in the active graphical login session rather than the CyComAgent service cgroup.", InputSchema: registry.ObjectSchema(map[string]any{
@@ -52,6 +59,7 @@ func registerProcess(r *registry.Registry, deps processDeps) {
 		"env":               map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
 		"shell":             registry.String("shell executable; defaults to the platform shell"),
 		"execution_context": executionContext,
+		"desktop_target":    desktopTarget,
 	}, []string{"command"}), Source: "core", Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
 		var in processSpawnInput
 		if err := decode(raw, &in); err != nil {
@@ -77,6 +85,7 @@ type processExecInput struct {
 	MaxOutputBytes   int               `json:"max_output_bytes"`
 	Privileged       bool              `json:"privileged"`
 	ExecutionContext string            `json:"execution_context"`
+	DesktopTarget    string            `json:"desktop_target"`
 }
 type processSpawnInput struct {
 	Command          string            `json:"command"`
@@ -84,6 +93,7 @@ type processSpawnInput struct {
 	Env              map[string]string `json:"env"`
 	Shell            string            `json:"shell"`
 	ExecutionContext string            `json:"execution_context"`
+	DesktopTarget    string            `json:"desktop_target"`
 }
 type processPIDInput struct {
 	PID int `json:"pid"`
@@ -91,6 +101,360 @@ type processPIDInput struct {
 type processSignalInput struct {
 	PID    int    `json:"pid"`
 	Signal string `json:"signal"`
+}
+
+type processDesktopRoute struct {
+	Target         string
+	Env            map[string]string
+	WaylandDisplay string
+}
+
+func prepareProcessDesktopRoute(requested, command, executionContext string, extra map[string]string) (processDesktopRoute, error) {
+	target, err := normalizeDesktopTarget(requested)
+	if err != nil {
+		return processDesktopRoute{}, fmt.Errorf("unsupported desktop_target %q", requested)
+	}
+	if target == "auto" {
+		if !processCommandNeedsWorkspaceRoute(executionContext, command) {
+			return processDesktopRoute{}, nil
+		}
+		target, _, _, err = automaticDesktopTarget()
+		if err != nil {
+			return processDesktopRoute{}, err
+		}
+	}
+	if target == "current" {
+		return processDesktopRoute{Target: "current", Env: extra}, nil
+	}
+	if unsafeGlobalHeadlessInputCommand(command) {
+		return processDesktopRoute{}, fmt.Errorf("refusing global input injector on desktop_target=agent_workspace; use compositor-scoped wlrctl/wtype/whydotool, or explicitly set desktop_target=current to control the physical desktop")
+	}
+	env, display, err := headlessProcessEnv(extra)
+	if err != nil {
+		return processDesktopRoute{}, fmt.Errorf("Agent Workspace is unavailable: %w; use desktop_target=current only when physical desktop control is intended", err)
+	}
+	return processDesktopRoute{Target: "agent_workspace", Env: env, WaylandDisplay: display}, nil
+}
+
+func processCommandNeedsWorkspaceRoute(executionContext, command string) bool {
+	switch executionContext {
+	case "", "auto":
+		return looksLikeDesktopCommand(command)
+	case "service":
+		// Preserve the existing safety rule for explicit service commands that
+		// inject pointer or keyboard input. Other service commands remain in the
+		// service context even if they have desktop-related names.
+		return looksLikeDesktopInputCommand(command)
+	default:
+		// Explicit desktop/user contexts retain their active-login-session
+		// bridge semantics. Unknown contexts are rejected by the context router.
+		return false
+	}
+}
+
+func headlessProcessEnv(extra map[string]string) (map[string]string, string, error) {
+	headlessEnv, display, err := cycomHeadlessEnvironment()
+	if err != nil {
+		return nil, "", err
+	}
+	out := map[string]string{}
+	for key, value := range extra {
+		out[key] = value
+	}
+	allowed := map[string]bool{
+		"XDG_RUNTIME_DIR": true, "WAYLAND_DISPLAY": true, "XDG_CURRENT_DESKTOP": true,
+		"XDG_SESSION_DESKTOP": true, "XDG_SESSION_TYPE": true, "CYCOM_AI_DESKTOP": true,
+		"DBUS_SESSION_BUS_ADDRESS": true,
+	}
+	for _, entry := range headlessEnv {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && allowed[key] {
+			out[key] = value
+		}
+	}
+	out["DISPLAY"] = ""
+	// Do not preserve the physical session bus address carried by either the
+	// service environment or a caller-provided env map.
+	out["DBUS_SESSION_BUS_ADDRESS"] = isolatedAgentWorkspaceBusAddress
+	out["CYCOM_ANYAPP_ISOLATED"] = "1"
+	return out, display, nil
+}
+
+func normalizedInputCommand(command string) string {
+	return strings.Join(strings.Fields(strings.ToLower(command)), " ")
+}
+
+func containsInputSubcommand(command, program string, subcommands ...string) bool {
+	value := normalizedInputCommand(command)
+	for _, subcommand := range subcommands {
+		needle := program + " " + subcommand
+		searchFrom := 0
+		for searchFrom < len(value) {
+			relative := strings.Index(value[searchFrom:], needle)
+			if relative < 0 {
+				break
+			}
+			index := searchFrom + relative
+			if index == 0 || !commandNameByte(value[index-1]) {
+				return true
+			}
+			searchFrom = index + len(program)
+		}
+	}
+	return false
+}
+
+func commandNameByte(value byte) bool {
+	return value >= 'a' && value <= 'z' ||
+		value >= '0' && value <= '9' ||
+		value == '_' || value == '-' || value == '.'
+}
+
+func looksLikeDesktopInputCommand(command string) bool {
+	value := normalizedInputCommand(command)
+	if invokesGlobalInputInjector(command) || invokesWhydotool(command) {
+		return true
+	}
+	if strings.Contains(value, "wtype ") || strings.HasSuffix(value, "wtype") {
+		return true
+	}
+	return containsInputSubcommand(value, "wlrctl", "pointer", "keyboard") ||
+		containsInputSubcommand(value, "whydotool", "mousemove", "click", "type", "key", "stdin") ||
+		containsInputSubcommand(value, "ydotool", "mousemove", "click", "type", "key") ||
+		containsInputSubcommand(value, "xdotool", "mousemove", "mousemove_relative", "click", "mousedown", "mouseup", "type", "key")
+}
+
+func unsafeGlobalHeadlessInputCommand(command string) bool {
+	return invokesGlobalInputInjector(command)
+}
+
+func invokesGlobalInputInjector(command string) bool {
+	return invokesExecutable(command, isGlobalInputInjector)
+}
+
+func invokesWhydotool(command string) bool {
+	return invokesExecutable(command, func(token string) bool {
+		return strings.EqualFold(filepath.Base(token), "whydotool")
+	})
+}
+
+func invokesExecutable(command string, matches func(string) bool) bool {
+	for _, tokens := range splitShellCommands(command) {
+		index := shellCommandExecutableIndex(tokens)
+		if index >= len(tokens) {
+			continue
+		}
+		if matches(tokens[index]) {
+			return true
+		}
+		if commandStringIndex := shellCommandStringIndex(tokens, index); commandStringIndex >= 0 && invokesExecutable(tokens[commandStringIndex], matches) {
+			return true
+		}
+	}
+	return false
+}
+
+func splitShellCommands(command string) [][]string {
+	var commands [][]string
+	var tokens []string
+	var word strings.Builder
+	var quote rune
+	escaped := false
+	flushWord := func() {
+		if word.Len() == 0 {
+			return
+		}
+		tokens = append(tokens, word.String())
+		word.Reset()
+	}
+	flushCommand := func() {
+		flushWord()
+		if len(tokens) != 0 {
+			commands = append(commands, tokens)
+			tokens = nil
+		}
+	}
+	for _, r := range command {
+		if escaped {
+			word.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+			} else {
+				word.WriteRune(r)
+			}
+			continue
+		}
+		switch r {
+		case '\'', '"', '`':
+			quote = r
+		case ' ', '\t', '\r':
+			flushWord()
+		case ';', '|', '&', '(', ')', '\n':
+			flushCommand()
+		default:
+			word.WriteRune(r)
+		}
+	}
+	if escaped {
+		word.WriteRune('\\')
+	}
+	flushCommand()
+	return commands
+}
+
+func shellCommandExecutableIndex(tokens []string) int {
+	index := 0
+	for depth := 0; depth < 8 && index < len(tokens); depth++ {
+		for index < len(tokens) && isShellAssignment(tokens[index]) {
+			index++
+		}
+		if index >= len(tokens) {
+			return index
+		}
+		name := filepath.Base(tokens[index])
+		switch name {
+		case "env":
+			index++
+			for index < len(tokens) {
+				if isShellAssignment(tokens[index]) {
+					index++
+					continue
+				}
+				if tokens[index] == "--" {
+					index++
+					break
+				}
+				if !strings.HasPrefix(tokens[index], "-") {
+					break
+				}
+				option := strings.SplitN(tokens[index], "=", 2)[0]
+				index++
+				if optionNeedsArgument(option, "-u", "--unset", "-C", "--chdir", "-S", "--split-string") && index < len(tokens) {
+					index++
+				}
+			}
+		case "sudo", "doas", "pkexec":
+			index++
+			for index < len(tokens) {
+				if tokens[index] == "--" {
+					index++
+					break
+				}
+				if !strings.HasPrefix(tokens[index], "-") {
+					break
+				}
+				option := strings.SplitN(tokens[index], "=", 2)[0]
+				index++
+				if optionNeedsArgument(option, "-u", "--user", "-g", "--group", "-h", "--host", "-p", "--prompt", "-C", "--close-from", "-R", "--chroot", "-T", "--command-timeout", "-D", "--chdir") && index < len(tokens) {
+					index++
+				}
+			}
+		case "command", "exec":
+			index++
+			for index < len(tokens) && strings.HasPrefix(tokens[index], "-") {
+				if tokens[index] == "--" {
+					index++
+					break
+				}
+				option := tokens[index]
+				index++
+				if optionNeedsArgument(option, "-a", "--argv0") && index < len(tokens) {
+					index++
+				}
+			}
+		case "nohup":
+			index++
+		case "nice":
+			index++
+			if index < len(tokens) && (tokens[index] == "-n" || tokens[index] == "--adjustment") {
+				index++
+				if index < len(tokens) {
+					index++
+				}
+			}
+		case "timeout":
+			index++
+			for index < len(tokens) && strings.HasPrefix(tokens[index], "-") {
+				option := strings.SplitN(tokens[index], "=", 2)[0]
+				index++
+				if optionNeedsArgument(option, "-k", "--kill-after", "-s", "--signal") && index < len(tokens) {
+					index++
+				}
+			}
+			if index < len(tokens) { // timeout duration
+				index++
+			}
+		default:
+			return index
+		}
+	}
+	return index
+}
+
+func optionNeedsArgument(option string, options ...string) bool {
+	for _, candidate := range options {
+		if option == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func isShellAssignment(token string) bool {
+	equals := strings.IndexByte(token, '=')
+	if equals <= 0 || strings.HasPrefix(token, "-") {
+		return false
+	}
+	for i, r := range token[:equals] {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' || (i > 0 && r >= '0' && r <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isGlobalInputInjector(token string) bool {
+	name := filepath.Base(token)
+	return strings.EqualFold(name, "ydotool") || strings.EqualFold(name, "xdotool")
+}
+
+func shellCommandStringIndex(tokens []string, executableIndex int) int {
+	name := filepath.Base(tokens[executableIndex])
+	if name != "sh" && name != "bash" && name != "dash" && name != "zsh" && name != "fish" {
+		return -1
+	}
+	for index := executableIndex + 1; index < len(tokens); index++ {
+		if tokens[index] == "-c" || tokens[index] == "--command" || (strings.HasPrefix(tokens[index], "-") && strings.Contains(tokens[index][1:], "c")) {
+			if index+1 < len(tokens) {
+				return index + 1
+			}
+			return -1
+		}
+		if !strings.HasPrefix(tokens[index], "-") {
+			return -1
+		}
+	}
+	return -1
+}
+
+func annotateProcessDesktopRoute(out map[string]any, route processDesktopRoute) {
+	if route.Target == "" {
+		return
+	}
+	out["desktop_target"] = route.Target
+	out["shared_physical_input"] = route.Target == "current"
+	if route.WaylandDisplay != "" {
+		out["wayland_display"] = route.WaylandDisplay
+	}
 }
 
 func processExec(ctx context.Context, raw json.RawMessage, root broker.Client, session sessionbridge.Client) (any, error) {
@@ -113,6 +477,13 @@ func processExec(ctx context.Context, raw json.RawMessage, root broker.Client, s
 	if shell == "" {
 		shell = platform.DefaultShell()
 	}
+	route, err := prepareProcessDesktopRoute(in.DesktopTarget, in.Command, in.ExecutionContext, in.Env)
+	if err != nil {
+		return nil, err
+	}
+	if route.Env != nil {
+		in.Env = route.Env
+	}
 
 	desktopAvailable := false
 	if executionContextNeedsBridgeProbe(in.ExecutionContext, in.Command, in.Privileged) {
@@ -133,12 +504,14 @@ func processExec(ctx context.Context, raw json.RawMessage, root broker.Client, s
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{
+		out := map[string]any{
 			"exit_code": res.ExitCode, "stdout": res.Stdout, "stderr": res.Stderr,
 			"duration_ms": res.DurationMS, "timed_out": res.TimedOut, "truncated": res.Truncated,
 			"privileged": false, "execution_context": executionContext, "session_bridge": true,
 			"pid": res.PID, "cgroup": res.Cgroup, "session": res.Session,
-		}, nil
+		}
+		annotateProcessDesktopRoute(out, route)
+		return out, nil
 	}
 	if executionContext == "system" && !in.Privileged {
 		return nil, fmt.Errorf("execution_context=system requires privileged=true so policy and the root broker remain authoritative")
@@ -158,11 +531,13 @@ func processExec(ctx context.Context, raw json.RawMessage, root broker.Client, s
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{
+		out := map[string]any{
 			"exit_code": res.ExitCode, "stdout": res.Stdout, "stderr": res.Stderr,
 			"duration_ms": res.DurationMS, "timed_out": res.TimedOut, "truncated": res.Truncated,
 			"privileged": true, "execution_context": executionContext,
-		}, nil
+		}
+		annotateProcessDesktopRoute(out, route)
+		return out, nil
 	}
 
 	cctx, cancel := context.WithTimeout(ctx, timeout)
@@ -201,6 +576,7 @@ func processExec(ctx context.Context, raw json.RawMessage, root broker.Client, s
 		"truncated": stdout.truncated || stderr.truncated, "privileged": false,
 		"execution_context": executionContext,
 	}
+	annotateProcessDesktopRoute(out, route)
 	if timedOut {
 		out["exit_code"] = -1
 		return out, nil
@@ -219,6 +595,13 @@ func processExec(ctx context.Context, raw json.RawMessage, root broker.Client, s
 func processSpawn(ctx context.Context, in processSpawnInput, deps processDeps) (any, error) {
 	if strings.TrimSpace(in.Command) == "" {
 		return nil, fmt.Errorf("command is required")
+	}
+	route, err := prepareProcessDesktopRoute(in.DesktopTarget, in.Command, in.ExecutionContext, in.Env)
+	if err != nil {
+		return nil, err
+	}
+	if route.Env != nil {
+		in.Env = route.Env
 	}
 	desktopAvailable := false
 	if executionContextNeedsBridgeProbe(in.ExecutionContext, in.Command, false) {
@@ -305,7 +688,8 @@ func looksLikeDesktopCommand(command string) bool {
 	value := strings.ToLower(command)
 	markers := []string{
 		"noctalia", "powerprofilesctl", "notify-send", "xdg-open", "gtk-launch",
-		"wl-copy", "wl-paste", "grim", "slurp", "wtype", "ydotool",
+		"wl-copy", "wl-paste", "grim", "slurp", "wtype", "ydotool", "xdotool",
+		"wlrctl", "whydotool",
 		"secret-tool", "kwallet", "kdialog", "zenity", "dbus-send --session",
 		"gdbus call --session", "busctl --user", "systemctl --user import-environment",
 	}

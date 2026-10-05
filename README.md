@@ -67,7 +67,7 @@ Application state is explicit (`job_*`, `state_*`, `target_*`) rather than hidde
 
 `process_exec`, `process_spawn`, `process_inspect`, `process_signal`
 
-`process_exec` is the universal escape hatch and accepts optional UTF-8 `stdin`. Commands run in a process group so timeout/cancellation kills the group instead of leaving descendants behind. On Linux it also accepts `execution_context=auto|service|user|desktop|system`: `desktop`/`user` route through the active login-session bridge, `service` stays in the CyComAgent service, and `system` requires `privileged=true` so the existing policy/root-broker boundary remains authoritative. `auto` is conservative and only routes a small set of known session-sensitive commands automatically; callers should explicitly request `desktop` for arbitrary GUI programs.
+`process_exec` is the universal escape hatch and accepts optional UTF-8 `stdin`. Commands run in a process group so timeout/cancellation kills the group instead of leaving descendants behind. On Linux it also accepts `execution_context=auto|service|user|desktop|system`: explicit `desktop`/`user` keep active-login-session bridge semantics, `service` keeps non-input commands in the CyComAgent service, and `system` requires `privileged=true` so the existing policy/root-broker boundary remains authoritative. With the default `desktop_target=auto`, `execution_context=auto` routes every recognized desktop/session command (such as notifications, `xdg-open`, clipboard/compositor tools, and Noctalia) through Agent Workspace and fails before command execution if its Wayland socket is unavailable. The isolated environment blocks the physical login D-Bus with `DBUS_SESSION_BUS_ADDRESS=unix:path=/dev/null`; D-Bus-dependent actions intentionally fail there instead of reaching the physical session. Recognized pointer/keyboard input commands, including any executable-token invocation of `ydotool` or `xdotool` with options or path qualification, remain isolated even when `execution_context=service`; any executable-token invocation of `whydotool` is also treated as input when options, a path, or a wrapper come before its subcommand. The global injectors are rejected on the isolated target because they act on the physical seat. Other explicit service commands remain service-local. Use `desktop_target=current` or `CYCOM_AGENT_WORKSPACE_AUTO=0` only when physical desktop access is intended.
 
 ### Persistent jobs — 5
 
@@ -95,7 +95,7 @@ When the bridge is absent, service/headless execution keeps working normally. Ex
 
 Adapters are selected from available host capabilities rather than hard-coding a desktop environment. The desktop runtime currently detects wlroots/Wayland, libei tooling, desktop portals, X11/XTest, Linux uinput fallback, and the macOS path, then scores available adapters per capability.
 
-`desktop_input` accepts `target=current|headless|auto`. `current` keeps the normal desktop behavior. On Linux, `headless` reads the dedicated CyCom AI Wayland socket and sends compositor-scoped virtual pointer/keyboard events with `wlrctl`/`wtype`. If that isolated compositor or socket is unavailable, the call **fails closed**; it does not fall back to `ydotool`/uinput and risk moving the user's physical-session pointer. `auto` is reserved for router-driven target selection and currently retains normal current-desktop behavior unless a more specific route is selected.
+`desktop_capture` and `desktop_input` accept `target=auto|agent_workspace|current` (`headless` remains a compatibility alias for `agent_workspace`). By default, `auto` requires the isolated Agent Workspace. If its Wayland socket is unavailable, capture, input, Any App startup, and recognized process desktop/session commands return a clear error instead of using the physical desktop. Select `target=current` to explicitly use the physical desktop. Operators who intentionally want automatic physical-desktop routing can opt out of isolation with `CYCOM_AGENT_WORKSPACE_AUTO=0`; case-insensitive `false`, `no`, `off`, `current`, and `desktop` are also accepted. On Linux, `agent_workspace` reads the dedicated CyCom AI Wayland socket and sends compositor-scoped virtual pointer/keyboard events with `wlrctl`/`wtype`; it does not fall back to `ydotool`/uinput. Its session-bus address is set to `unix:path=/dev/null`, so D-Bus-dependent UI/session commands fail rather than using the physical login bus.
 
 Example isolated input call:
 
@@ -119,6 +119,12 @@ normal apps / games             AI-controlled apps
 ```
 
 `ydotool`/uinput remains an explicit global fallback for environments that need it, but it is not classified as isolated input.
+
+### Optional connected browser extension
+
+The CyCom Browser Bridge extension controls the normal browser profile where it is installed. It can enumerate real tabs, inspect page state, capture screenshots, navigate, and send pointer or keyboard input. It is not a dedicated or isolated browser: actions can change pages, and the extension may focus a tab or browser window, including during capture. Use it only when access to that browser profile and those visible side effects are acceptable.
+
+The bridge's loopback `/api` endpoint rejects every request with an `Origin` header and accepts only `application/json` requests from native clients. These checks reduce drive-by requests from websites; they do not authenticate local processes, which can still connect to a loopback service.
 
 ### Optional Linux Any App tools
 

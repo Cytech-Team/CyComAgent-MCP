@@ -225,7 +225,11 @@ func anyAppContentError(content []map[string]any) string {
 
 func (c *anyAppClient) ensureStartedLocked(ctx context.Context) error {
 	env := desktopEnvironment()
-	env = anyAppIsolatedDesktopEnv(env)
+	var err error
+	env, err = anyAppIsolatedDesktopEnv(env)
+	if err != nil {
+		return err
+	}
 	sig := anyAppDesktopEnvSignature(env) + "\x00" + anyAppBinaryFingerprint(c.binary)
 	return c.stdioMCPState.ensureStartedLocked(ctx, c.binary, []string{"mcp"}, env, sig, "Any App", "CyComAgent-AnyApp")
 }
@@ -246,23 +250,30 @@ func (c *anyAppClient) rpcLocked(ctx context.Context, method string, params any)
 	return nil, err
 }
 
-func anyAppIsolatedDesktopEnv(env []string) []string {
+func anyAppIsolatedDesktopEnv(env []string) ([]string, error) {
+	target, headlessEnv, display, err := automaticDesktopTarget()
+	if err != nil {
+		return nil, fmt.Errorf("Any App desktop routing requires Agent Workspace: %w", err)
+	}
+	if target == "current" {
+		return env, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return env
+		if err == nil {
+			err = fmt.Errorf("home directory is unavailable")
+		}
+		return nil, fmt.Errorf("Any App cannot prepare its isolated Agent Workspace environment: %w", err)
 	}
-	statePath := filepath.Join(home, ".local", "state", "cycom-ai-desktop", "wayland-display")
-	data, err := os.ReadFile(statePath)
-	if err != nil {
-		return env
+	runtimeDir := ""
+	for _, entry := range headlessEnv {
+		if strings.HasPrefix(entry, "XDG_RUNTIME_DIR=") {
+			runtimeDir = strings.TrimPrefix(entry, "XDG_RUNTIME_DIR=")
+			break
+		}
 	}
-	display := strings.TrimSpace(string(data))
-	if display == "" {
-		return env
-	}
-	runtimeDir := fmt.Sprintf("/run/user/%d", os.Getuid())
-	if st, err := os.Stat(filepath.Join(runtimeDir, display)); err != nil || st.Mode()&os.ModeSocket == 0 {
-		return env
+	if runtimeDir == "" || display == "" {
+		return nil, fmt.Errorf("Any App cannot prepare its isolated Agent Workspace environment: validated runtime directory or display is missing")
 	}
 
 	// Any App's normal Linux fallback may use ydotool, which injects through
@@ -289,6 +300,7 @@ func anyAppIsolatedDesktopEnv(env []string) []string {
 	set := map[string]string{
 		"WAYLAND_DISPLAY":                          display,
 		"XDG_RUNTIME_DIR":                          runtimeDir,
+		"DBUS_SESSION_BUS_ADDRESS":                 isolatedAgentWorkspaceBusAddress,
 		"XDG_SESSION_TYPE":                         "wayland",
 		"XDG_CURRENT_DESKTOP":                      "labwc-ai",
 		"XDG_SESSION_DESKTOP":                      "labwc-ai",
@@ -326,7 +338,7 @@ func anyAppIsolatedDesktopEnv(env []string) []string {
 			out = append(out, key+"="+value)
 		}
 	}
-	return out
+	return out, nil
 }
 
 func anyAppDesktopEnvSignature(env []string) string {

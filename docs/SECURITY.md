@@ -12,7 +12,10 @@ Treat an MCP client authorized to call a `full` policy runtime as equivalent to 
 - Non-loopback binding without `CYCOM_TOKEN` is refused by default.
 - `CYCOM_TOKEN` can be sent as `Authorization: Bearer ...` or `X-CyCom-Token`.
 - Browser `Origin` is rejected unless it is syntactically loopback, reducing DNS-rebinding exposure.
+- The separate Browser Bridge `/api` endpoint rejects every request that carries an `Origin` header (including `Origin: null`) and requires a single valid `application/json` Content-Type. Its `/extension` WebSocket handshake uses a `chrome-extension://*` origin pattern.
 - With OpenAI tunnel-client, keep the MCP origin on loopback and let the tunnel provide the remote transport.
+
+The Browser Bridge is not authenticated against arbitrary local processes: any process able to connect to its loopback listener can submit originless JSON requests. Its browser extension operates on the user's normal connected browser profile, can enumerate real tabs, and can alter pages or focus tabs/windows during interactions or capture. Treat `browser_use` as access to that browser's data and as an action that may be visible to the user; it does not use a dedicated isolated browser.
 
 ## Policy
 
