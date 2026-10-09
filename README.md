@@ -1,4 +1,19 @@
-# CyComAgent-MCP
+<!-- CYTECH_README_REFRESH:START -->
+<div align="center">
+
+<a href="https://github.com/Cytech-Team/CyComAgent-MCP"><img width="100%" alt="CyComAgent MCP banner" src="https://capsule-render.vercel.app/api?type=waving&color=0:101828,100:8B5CF6&height=210&section=header&text=CyComAgent%20MCP&fontSize=43&fontColor=ffffff&fontAlignY=36&desc=Give%20AI%20capabilities%2C%20not%20workflows&descAlignY=59&descSize=16"></a>
+
+<img alt="PROJECT: AI Native Runtime" src="https://img.shields.io/badge/PROJECT-AI%20Native%20Runtime-8B5CF6?style=flat-square&labelColor=101828&color=8B5CF6"> <img alt="STACK: MCP · Multi-OS" src="https://img.shields.io/badge/STACK-MCP%20%C2%B7%20Multi%2DOS-8B5CF6?style=flat-square&labelColor=101828&color=8B5CF6">
+
+<p><strong>Give AI capabilities, not workflows</strong></p>
+
+<a href="https://github.com/Cytech-Team/CyComAgent-MCP/releases">Releases</a> · <a href="https://github.com/Cytech-Team/CyComAgent-MCP/issues">Issues</a> · <a href="https://github.com/Cytech-Team/CyComAgent-MCP">Source</a>
+
+</div>
+
+<!-- CYTECH_README_REFRESH:END -->
+
+---
 
 **Give AI capabilities, not workflows.**
 
