@@ -391,6 +391,6 @@ case "$(uname -s 2>/dev/null || printf unknown)" in
     install_macos
     ;;
   *)
-    fail "unsupported platform; on Windows use: curl.exe -fsSL https://cdn.cytechteam.site/install/cycomagent.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command -"
+    fail "unsupported platform; on Windows use the GitHub bootstrap: irm https://raw.githubusercontent.com/Cytech-Team/CyComAgent-MCP/main/platform/windows/Bootstrap-CyComAgent-Windows.ps1 | iex"
     ;;
 esac
