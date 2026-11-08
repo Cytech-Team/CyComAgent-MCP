@@ -7,6 +7,7 @@ REPO="${CYCOM_UPSTREAM_REPO:-Cytech-Team/CyComAgent-MCP}"
 CHANNEL="${CYCOM_AUTO_UPDATE_CHANNEL:-prerelease}"
 PLATFORM="${1:-}"
 BIN_DIR="${2:-}"
+USER_NAME="${3:-}"
 LOG_TAG="cycomagent-updater"
 say() { printf '%s: %s\n' "$LOG_TAG" "$*" >&2; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -90,6 +91,7 @@ for tag in $TAGS; do
   [ "$VALID" -eq 1 ] || { say "asset/checksum validation failed for $tag; trying older prerelease"; continue; }
 
   CHANGED=0
+  ROOT_CHANGED=0
   for asset in $ASSETS; do
     case "$asset" in
       cycomagent-linux-amd64) target="$BIN_DIR/cycomagent" ;;
@@ -107,7 +109,11 @@ for tag in $TAGS; do
       exit 0
     fi
     CHANGED=1
+    [ "$asset" != "cycomagent-root-linux-amd64" ] || ROOT_CHANGED=1
   done
+  if [ "$ROOT_CHANGED" -eq 1 ] && [ -n "$USER_NAME" ] && have systemctl; then
+    systemctl restart "cycomagent-root@$USER_NAME.service" >/dev/null 2>&1 || say "root broker restart failed; restart it manually"
+  fi
   if [ "$CHANGED" -eq 1 ]; then
     say "updated $PLATFORM to $tag"
   else
