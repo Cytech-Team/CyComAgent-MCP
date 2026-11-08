@@ -11,7 +11,7 @@ id "$USER_NAME" >/dev/null
 install -d -m 0755 /usr/local/lib/cycomagent /etc/cycomagent /etc/xdg/autostart
 install -m 0755 "$ROOT/dist/cycomagent" /usr/local/bin/cycomagent
 install -m 0755 "$ROOT/dist/cycomagent-root" /usr/local/bin/cycomagent-root
-install -m 0755 "$ROOT/scripts/watchdog.sh" /usr/local/lib/cycomagent/watchdog.sh
+install -m 0755 "$ROOT/scripts/watchdog.sh" /usr/local/lib/cycomagent/watchdog.sh\ninstall -m 0755 "$ROOT/scripts/update-on-start.sh" /usr/local/lib/cycomagent/update-on-start.sh
 install -m 0755 "$ROOT/scripts/smoke-mcp.sh" /usr/local/lib/cycomagent/smoke-mcp.sh
 install -m 0755 "$ROOT/scripts/doctor.sh" /usr/local/lib/cycomagent/doctor.sh
 install -m 0755 "$ROOT/scripts/chaos-test.sh" /usr/local/lib/cycomagent/chaos-test.sh
