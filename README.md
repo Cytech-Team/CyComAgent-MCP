@@ -277,7 +277,19 @@ The POSIX bootstrap discovers GitHub Releases through the GitHub API and default
 
 Machine-specific source adaptations are cataloged under [`nea/`](nea/) instead of being embedded as one-off edits inside build scripts. This keeps upstream updates and local compatibility fixes independently reviewable.
 
-## Upstream auto-update\n\nThe Linux systemd unit invokes `scripts/update-on-start.sh` as a privileged pre-start check before launching the runtime. Termux invokes the same updater from its runit service wrapper before `exec`-ing `cycomagent`. The default channel is GitHub **Pre-release**, checked at every service start. The updater uses the GitHub Releases API, downloads `SHA256SUMS-sync` and all platform-required binaries, validates all checksums before replacing anything, and fails open when GitHub is unreachable.\n\nEnvironment controls:\n\n- `CYCOM_AUTO_UPDATE=0` disables the startup check.\n- `CYCOM_AUTO_UPDATE_CHANNEL=prerelease|stable` selects the release channel (default `prerelease`).\n- `CYCOM_UPSTREAM_REPO=owner/repo` overrides the upstream repository.\n\nThis startup updater currently supports Linux amd64/systemd and Android/Termux arm64. macOS and Windows still use their platform installers without startup self-update.\n\n## Build
+## Upstream auto-update
+
+The Linux systemd unit invokes `scripts/update-on-start.sh` as a privileged pre-start check before launching the runtime. Termux invokes the same updater from its runit service wrapper before `exec`-ing `cycomagent`. The default channel is GitHub **Pre-release**, checked at every service start. The updater uses the GitHub Releases API, downloads `SHA256SUMS-sync` and all platform-required binaries, validates all checksums before replacing anything, and fails open when GitHub is unreachable.
+
+Environment controls:
+
+- `CYCOM_AUTO_UPDATE=0` disables the startup check.
+- `CYCOM_AUTO_UPDATE_CHANNEL=prerelease|stable` selects the release channel (default `prerelease`).
+- `CYCOM_UPSTREAM_REPO=owner/repo` overrides the upstream repository.
+
+This startup updater currently supports Linux amd64/systemd and Android/Termux arm64. macOS and Windows still use their platform installers without startup self-update.
+
+## Build
 
 The core still uses only the Go standard library.
 
