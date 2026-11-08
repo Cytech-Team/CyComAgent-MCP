@@ -2,7 +2,7 @@
 set -eu
 
 REPO_SLUG="${CYCOM_UPSTREAM_REPO:-Cytech-Team/CyComAgent-MCP}"
-RELEASES_ATOM="https://github.com/$REPO_SLUG/releases.atom"
+RELEASES_API="https://api.github.com/repos/$REPO_SLUG/releases?per_page=100"\nRELEASE_CHANNEL="${CYCOM_RELEASE_CHANNEL:-prerelease}"
 NEA_TERMUX_BASE="${CYCOM_NEA_TERMUX_BASE:-https://cdn.cytechteam.site/uploads/nea/termux-arm64/tunnel-client}"
 AUTO_UPSTREAM="${CYCOM_AUTO_UPSTREAM:-1}"
 DRY_RUN="${CYCOM_DRY_RUN:-0}"
@@ -43,11 +43,25 @@ release_tags() {
     return
   fi
   make_workdir
-  feed="$WORK/releases.atom"
+  feed="$WORK/releases.json"
   if [ ! -s "$feed" ]; then
-    curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 15 "$RELEASES_ATOM" -o "$feed"
+    curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 15 \
+      -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' \
+      "$RELEASES_API" -o "$feed"
   fi
-  sed -n 's#.*href="https://github.com/[^"]*/releases/tag/\([^"]*\)".*#\1#p' "$feed" | awk '!seen[$0]++'
+  case "$RELEASE_CHANNEL" in
+    prerelease)
+      awk '/"tag_name"[[:space:]]*:/ { tag=$2; gsub(/[",]/, "", tag) }
+           /"prerelease"[[:space:]]*:[[:space:]]*true/ { if (tag != "") print tag; tag="" }
+           /"prerelease"[[:space:]]*:[[:space:]]*false/ { tag="" }' "$feed"
+      ;;
+    stable)
+      awk '/"tag_name"[[:space:]]*:/ { tag=$2; gsub(/[",]/, "", tag) }
+           /"prerelease"[[:space:]]*:[[:space:]]*false/ { if (tag != "") print tag; tag="" }
+           /"prerelease"[[:space:]]*:[[:space:]]*true/ { tag="" }' "$feed"
+      ;;
+    *) fail "unknown CYCOM_RELEASE_CHANNEL: $RELEASE_CHANNEL" ;;
+  esac
 }
 
 release_base() {
