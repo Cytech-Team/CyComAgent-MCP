@@ -45,6 +45,7 @@ export TMPDIR='$TMPDIR'
 export CYCOM_STATE_DIR='$STATE'
 # Android device root / su / Magisk is intentionally unsupported and not planned.
 unset CYCOM_ROOT_SOCKET
+'$PREFIX/lib/cycomagent/update-on-start.sh' termux-arm64 '$PREFIX/bin' || true
 exec '$PREFIX/bin/cycomagent' --addr 127.0.0.1:7331
 EOF_AGENT
 chmod 0755 "$AGENT_SERVICE/run"
