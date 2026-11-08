@@ -2,7 +2,8 @@
 set -eu
 
 REPO_SLUG="${CYCOM_UPSTREAM_REPO:-Cytech-Team/CyComAgent-MCP}"
-RELEASES_API="https://api.github.com/repos/$REPO_SLUG/releases?per_page=100"\nRELEASE_CHANNEL="${CYCOM_RELEASE_CHANNEL:-prerelease}"
+RELEASES_API="https://api.github.com/repos/$REPO_SLUG/releases?per_page=100"
+RELEASE_CHANNEL="${CYCOM_RELEASE_CHANNEL:-prerelease}"
 NEA_TERMUX_BASE="${CYCOM_NEA_TERMUX_BASE:-https://cdn.cytechteam.site/uploads/nea/termux-arm64/tunnel-client}"
 AUTO_UPSTREAM="${CYCOM_AUTO_UPSTREAM:-1}"
 DRY_RUN="${CYCOM_DRY_RUN:-0}"
