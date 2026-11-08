@@ -15,7 +15,7 @@ Environment=CYCOM_PLUGIN_DIR=/var/lib/cycomagent-%i/plugins.d
 Environment=CYCOM_ROOT_SOCKET=/run/cycomagent-%i/root.sock
 Environment=CYCOM_STRICT_MCP=false
 EnvironmentFile=-/etc/cycomagent/%i.env
-ExecStart=/usr/local/bin/cycomagent
+ExecStartPre=+/usr/local/lib/cycomagent/update-on-start.sh linux-amd64 /usr/local/bin\nExecStart=/usr/local/bin/cycomagent
 Restart=always
 RestartSec=1
 TimeoutStartSec=20
