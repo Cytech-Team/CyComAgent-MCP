@@ -249,16 +249,28 @@ This keeps application-specific capabilities outside the generic core.
 Linux amd64 (systemd), Android/Termux ARM64, and experimental macOS (Apple Silicon arm64 or Intel amd64) use the same command; the installer detects the platform automatically:
 
 ```sh
-curl -fsSL https://cdn.cytechteam.site/install/cycomagent | sh
+curl -fsSL https://raw.githubusercontent.com/Cytech-Team/CyComAgent-MCP/main/scripts/bootstrap.sh | sh
 ```
 
 Windows 10/11 uses the same curl-based flow but pipes into Windows PowerShell because Windows does not ship `sh` by default:
 
 ```powershell
-curl.exe -fsSL https://cdn.cytechteam.site/install/cycomagent.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command -
+irm https://raw.githubusercontent.com/Cytech-Team/CyComAgent-MCP/main/platform/windows/Bootstrap-CyComAgent-Windows.ps1 | iex
 ```
 
-Each bootstrap downloads an immutable GitHub Release asset and validates its published SHA-256 checksum before installation. Windows may show a UAC prompt because the bridge is installed as a SYSTEM startup task. macOS installs as a user LaunchAgent and may later request normal Screen Recording, Accessibility, or Automation permissions when desktop capabilities are used.
+The POSIX bootstrap discovers GitHub Releases through the GitHub API and defaults to the `prerelease` channel (`CYCOM_RELEASE_CHANNEL=stable` selects stable releases). It selects the newest compatible installer package and verifies the published SHA-256 file. Set `CYCOM_RELEASE_TAG=v...` to pin bootstrap discovery. Windows may show a UAC prompt because the bridge is installed as a SYSTEM startup task. macOS installs as a user LaunchAgent and may later request normal Screen Recording, Accessibility, or Automation permissions when desktop capabilities are used.
+
+## Upstream auto-update
+
+The Linux systemd unit invokes `scripts/update-on-start.sh` as a privileged pre-start check before launching the runtime. Termux invokes the same updater from its runit service wrapper before `exec`-ing `cycomagent`. The default channel is GitHub **Pre-release**, checked at every service start. The updater uses the GitHub Releases API, downloads `SHA256SUMS-sync` and all platform-required binaries, validates all checksums before replacing anything, and fails open when GitHub is unreachable.
+
+Environment controls:
+
+- `CYCOM_AUTO_UPDATE=0` disables the startup check.
+- `CYCOM_AUTO_UPDATE_CHANNEL=prerelease|stable` selects the release channel (default `prerelease`).
+- `CYCOM_UPSTREAM_REPO=owner/repo` overrides the upstream repository.
+
+This startup updater currently supports Linux amd64/systemd and Android/Termux arm64. macOS and Windows still use their platform installers without startup self-update.
 
 ## Build
 
@@ -333,7 +345,7 @@ The mobile assistant surface includes device status, speech-to-text, TTS, notifi
 The public POSIX bootstrap auto-detects Darwin:
 
 ```sh
-curl -fsSL https://cdn.cytechteam.site/install/cycomagent | sh
+curl -fsSL https://raw.githubusercontent.com/Cytech-Team/CyComAgent-MCP/main/scripts/bootstrap.sh | sh
 ```
 
 Supported release architectures are Apple Silicon `arm64` and Intel `amd64`. The installer places the runtime under `~/Library/Application Support/CyComAgent`, stores state there, writes logs under `~/Library/Logs/CyComAgent`, and registers the user LaunchAgent `com.cytech.cycomagent`. It does not install or emulate the Linux root broker.

@@ -34,7 +34,8 @@ SERVICE_ROOT="$PREFIX/var/service"
 AGENT_SERVICE="$SERVICE_ROOT/cycomagent"
 TUNNEL_SERVICE="$SERVICE_ROOT/cycomagent-tunnel"
 
-mkdir -p "$STATE" "$STATE/log" "$STATE/tunnel-log" "$CONFIG" "$AGENT_SERVICE/log" "$TUNNEL_SERVICE/log"
+mkdir -p "$STATE" "$STATE/log" "$STATE/tunnel-log" "$CONFIG" "$AGENT_SERVICE/log" "$TUNNEL_SERVICE/log" "$PREFIX/lib/cycomagent"
+install -m 0755 "$ROOT/scripts/update-on-start.sh" "$PREFIX/lib/cycomagent/update-on-start.sh"
 chmod 700 "$STATE" "$CONFIG"
 
 cat > "$AGENT_SERVICE/run" <<EOF_AGENT
@@ -45,6 +46,7 @@ export TMPDIR='$TMPDIR'
 export CYCOM_STATE_DIR='$STATE'
 # Android device root / su / Magisk is intentionally unsupported and not planned.
 unset CYCOM_ROOT_SOCKET
+'$PREFIX/lib/cycomagent/update-on-start.sh' termux-arm64 '$PREFIX/bin' || true
 exec '$PREFIX/bin/cycomagent' --addr 127.0.0.1:7331
 EOF_AGENT
 chmod 0755 "$AGENT_SERVICE/run"

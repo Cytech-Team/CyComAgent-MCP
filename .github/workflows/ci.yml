@@ -21,8 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Parse POSIX bootstrap scripts
-        run: sh -n scripts/bootstrap.sh scripts/bootstrap-termux.sh scripts/install-launchd.sh
+      - name: Parse POSIX bootstrap and installer scripts
+        run: sh -n scripts/bootstrap.sh scripts/bootstrap-termux.sh scripts/update-on-start.sh scripts/install-launchd.sh scripts/build-termux-tunnel.sh
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
