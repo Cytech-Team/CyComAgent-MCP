@@ -79,3 +79,22 @@ func TestSensitiveAndroidRequiresExplicitOptIn(t *testing.T) {
 		t.Fatalf("explicit opt-in should allow policy stage: %v", err)
 	}
 }
+
+func TestRemoteJobExecutionPolicyIsNotImpliedByFullMode(t *testing.T) {
+	e, err := New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := e.Snapshot()
+	if cfg.Mode != "full" {
+		t.Fatalf("fixture mode=%q", cfg.Mode)
+	}
+	// Full mode currently governs local MCP tool policy only. It must never be
+	// interpreted as authorization for a trusted remote node to execute code.
+	if cfg.AllowRemoteTargets == false {
+		t.Fatal("fixture expects normal local policy defaults")
+	}
+	if err := e.BeforeCall(context.Background(), "federation_remote_job_dispatch", json.RawMessage(`{"caller_node_id":"trusted-peer","executable":"/bin/sh","argv":["-c","id"]}`)); err == nil {
+		t.Fatal("remote dispatch unexpectedly passed generic policy: dispatch must remain unregistered/denied until a dedicated local execution policy exists")
+	}
+}

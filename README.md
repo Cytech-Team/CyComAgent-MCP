@@ -1,19 +1,4 @@
-<!-- CYTECH_README_REFRESH:START -->
-<div align="center">
-
-<a href="https://github.com/Cytech-Team/CyComAgent-MCP"><img width="100%" alt="CyComAgent MCP banner" src="https://capsule-render.vercel.app/api?type=waving&color=0:101828,100:8B5CF6&height=210&section=header&text=CyComAgent%20MCP&fontSize=43&fontColor=ffffff&fontAlignY=36&desc=Give%20AI%20capabilities%2C%20not%20workflows&descAlignY=59&descSize=16"></a>
-
-<img alt="PROJECT: AI Native Runtime" src="https://img.shields.io/badge/PROJECT-AI%20Native%20Runtime-8B5CF6?style=flat-square&labelColor=101828&color=8B5CF6"> <img alt="STACK: MCP · Multi-OS" src="https://img.shields.io/badge/STACK-MCP%20%C2%B7%20Multi%2DOS-8B5CF6?style=flat-square&labelColor=101828&color=8B5CF6">
-
-<p><strong>Give AI capabilities, not workflows</strong></p>
-
-<a href="https://github.com/Cytech-Team/CyComAgent-MCP/releases">Releases</a> · <a href="https://github.com/Cytech-Team/CyComAgent-MCP/issues">Issues</a> · <a href="https://github.com/Cytech-Team/CyComAgent-MCP">Source</a>
-
-</div>
-
-<!-- CYTECH_README_REFRESH:END -->
-
----
+# CyComAgent-MCP
 
 **Give AI capabilities, not workflows.**
 
@@ -273,9 +258,7 @@ Windows 10/11 uses the same curl-based flow but pipes into Windows PowerShell be
 curl.exe -fsSL https://cdn.cytechteam.site/install/cycomagent.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command -
 ```
 
-The POSIX bootstrap now follows upstream automatically: it selects the newest published release that still contains the full installer package for the detected platform, verifies that immutable asset with its published SHA-256 file, then upgrades the runtime to the newest compatible `SHA256SUMS-sync` binary release when one exists. Android/Termux also layers the current **NEA** machine adaptation for the tunnel runtime after checksum verification. Set `CYCOM_AUTO_UPSTREAM=0` to keep only the packaged release, or `CYCOM_RELEASE_TAG=v...` to pin release discovery. Windows may show a UAC prompt because the bridge is installed as a SYSTEM startup task. macOS installs as a user LaunchAgent and may later request normal Screen Recording, Accessibility, or Automation permissions when desktop capabilities are used.
-
-Machine-specific source adaptations are cataloged under [`nea/`](nea/) instead of being embedded as one-off edits inside build scripts. This keeps upstream updates and local compatibility fixes independently reviewable.
+Each bootstrap downloads an immutable GitHub Release asset and validates its published SHA-256 checksum before installation. Windows may show a UAC prompt because the bridge is installed as a SYSTEM startup task. macOS installs as a user LaunchAgent and may later request normal Screen Recording, Accessibility, or Automation permissions when desktop capabilities are used.
 
 ## Build
 
@@ -428,20 +411,16 @@ If an AI can solve a task using `fs_* + process_exec + target_exec + state_* + s
 
 MIT. See `THIRD_PARTY.md` for inspirations/references.
 
----
+## Unified Cross-Platform Build / Release
 
-<!-- CYTECH_STAR_HISTORY:START -->
+Use the single `cycom` command to detect the host and coordinate platform builds:
 
-## Star History
+```bash
+./cycom detect       # detect OS + architecture
+./cycom build        # build the current supported platform
+./cycom build --all  # build every supported target
+./cycom test         # tests + vet
+./cycom release      # test + build + package + checksums for all supported targets
+```
 
-<a href="https://github.com/Cytech-Team/CyComAgent-MCP/stargazers">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Cytech-Team/CyComAgent-MCP/refs/heads/main/assets/star-history-dark.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Cytech-Team/CyComAgent-MCP/refs/heads/main/assets/star-history-light.svg" />
-    <img alt="Star history for Cytech-Team/CyComAgent-MCP" src="https://raw.githubusercontent.com/Cytech-Team/CyComAgent-MCP/refs/heads/main/assets/star-history-light.svg" width="1100" />
-  </picture>
-</a>
-
-<sub>Updated automatically from GitHub's dated stargazers. Only currently starred accounts are included.</sub>
-
-<!-- CYTECH_STAR_HISTORY:END -->
+The unified release currently includes Linux amd64, Android/Termux arm64, macOS arm64/amd64, and the Windows PowerShell bridge package. Native Android APK and iOS app packaging are not implemented yet; those require separate native app/signing pipelines. `./cycom release` only builds local artifacts. A pushed `v*` tag invokes GitHub Actions to publish the generated `dist/*` assets. See [Unified Release Architecture](docs/UNIFIED_RELEASE.md).

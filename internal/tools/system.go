@@ -76,9 +76,13 @@ func systemInfo(deps systemDeps) map[string]any {
 	hostname, _ := os.Hostname()
 	wd, _ := os.Getwd()
 	user := os.Getenv("USER")
-	out := map[string]any{"hostname": hostname, "user": user, "cwd": wd, "goos": runtime.GOOS, "goarch": runtime.GOARCH, "cpus": runtime.NumCPU(), "pid": os.Getpid(), "version": deps.Version, "state_dir": deps.StateDir, "root_broker": deps.Broker.Available(), "termux": platform.IsTermux()}
+	out := map[string]any{"hostname": hostname, "user": user, "cwd": wd, "goos": runtime.GOOS, "goarch": runtime.GOARCH, "cpus": runtime.NumCPU(), "pid": os.Getpid(), "version": deps.Version, "state_dir": deps.StateDir, "root_broker": deps.Broker.Available(), "termux": platform.IsTermux(), "android_hybrid": platform.IsAndroidHybrid()}
 	out["desktop_session_bridge"] = desktopSessionBridgeSnapshot(deps.Session)
-	if platform.IsTermux() {
+	if platform.IsAndroidHybrid() {
+		out["runtime_profile"] = "android_full_hybrid"
+		out["android_device_root_support"] = "runtime_root"
+		out["android_device_root_planned"] = true
+	} else if platform.IsTermux() {
 		out["runtime_profile"] = "mobile_assistant"
 		out["android_device_root_support"] = "not_supported"
 		out["android_device_root_planned"] = false
@@ -416,15 +420,21 @@ func capabilities(r *registry.Registry, deps systemDeps) map[string]any {
 		{"capability": "desktop.input", "adapter": "ydotool", "score": score(found["ydotool"], 100), "available": found["ydotool"]},
 		{"capability": "desktop.input", "adapter": "wtype", "score": score(found["wtype"], 90), "available": found["wtype"]},
 		{"capability": "desktop.input", "adapter": "xdotool", "score": score(found["xdotool"], 80), "available": found["xdotool"]},
-		{"capability": "android.api", "adapter": "termux-api", "score": score(platform.IsTermux() && found["termux-battery-status"], 90), "available": platform.IsTermux() && found["termux-battery-status"]},
+		{"capability": "android.api", "adapter": "termux-api-bridge", "score": score(platform.HasAndroidAssistant() && found["termux-battery-status"], 90), "available": platform.HasAndroidAssistant() && found["termux-battery-status"]},
 	}
 	sort.Strings(names)
 	return map[string]any{"tools": names, "binaries": found, "adapters": adapters, "desktop_runtime": desktopruntime.Detect(), "plugins": deps.Plugins.Names(), "targets": deps.Targets.List(), "root_broker": deps.Broker.Available(), "desktop_session_bridge": sessionStatus, "local_privilege_supported": platform.SupportsLocalPrivilege(), "android_device_root_support": func() string {
+		if platform.IsAndroidHybrid() {
+			return "runtime_root"
+		}
 		if runtime.GOOS == "android" || platform.IsTermux() {
 			return "not_supported"
 		}
 		return "n/a"
-	}(), "android_device_root_planned": false, "runtime_profile": func() string {
+	}(), "android_device_root_planned": platform.IsAndroidHybrid(), "runtime_profile": func() string {
+		if platform.IsAndroidHybrid() {
+			return "android_full_hybrid"
+		}
 		if platform.IsTermux() {
 			return "mobile_assistant"
 		}

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -108,7 +110,38 @@ func ttyControl(ctx context.Context, root broker.Client, raw json.RawMessage) (a
 	return map[string]any{"tty": tty, "action": action, "sudo_less": true, "result": res}, nil
 }
 
+// androidDisplayOutputs reports the phone's physical display from dumpsys.
+// GOOS=android satisfies the linux build tag, so this file also compiles for
+// the Android runtime, where the desktop adapters below can never succeed.
+func androidDisplayOutputs(ctx context.Context) (any, error) {
+	bin, err := exec.LookPath("dumpsys")
+	if err != nil {
+		return nil, fmt.Errorf("android display adapter unavailable: %w", err)
+	}
+	ac, cancel := context.WithTimeout(ctx, desktopAdapterAttemptTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ac, bin, "display")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("dumpsys display failed: %w", err)
+	}
+	text := string(out)
+	frame := regexp.MustCompile(`logicalFrame=Rect\((\d+), (\d+) - (\d+), (\d+)\)`).FindStringSubmatch(text)
+	info := map[string]any{"adapter": "android-dumpsys-display", "raw": text}
+	if frame != nil {
+		info["width"], _ = strconv.Atoi(frame[3])
+		info["height"], _ = strconv.Atoi(frame[4])
+	}
+	if id := regexp.MustCompile(`displayId=(\d+)`).FindStringSubmatch(text); id != nil {
+		info["display_id"] = id[1]
+	}
+	return info, nil
+}
+
 func displayOutputs(ctx context.Context, _ json.RawMessage) (any, error) {
+	if runtime.GOOS == "android" {
+		return androidDisplayOutputs(ctx)
+	}
 	type cand struct {
 		name, bin string
 		args      []string

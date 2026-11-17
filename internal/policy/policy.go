@@ -124,6 +124,12 @@ func (e *Engine) save(cfg Config) error {
 
 func (e *Engine) BeforeCall(_ context.Context, tool string, args json.RawMessage) error {
 	cfg := e.Snapshot()
+	// Remote Job dispatch requires a dedicated receiver-local execution
+	// authorization policy. Generic MCP full mode and Federation trust alone
+	// must never authorize remote process creation.
+	if tool == "federation_remote_job_dispatch" {
+		return fmt.Errorf("policy denied remote job dispatch: dedicated local execution policy is not configured")
+	}
 	for _, p := range cfg.DenyTools {
 		if match(p, tool) {
 			return fmt.Errorf("policy denied tool %s", tool)

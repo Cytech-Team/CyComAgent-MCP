@@ -1,11 +1,24 @@
 {
   "manifest_version": 3,
   "name": "CyCom Browser Bridge",
-  "version": "0.1.0",
-  "description": "Semantic browser control bridge for CyComAgent.",
-  "permissions": ["tabs", "scripting", "activeTab", "debugger"],
+  "version": "0.3.15",
+  "description": "Visual and semantic browser-control bridge for CyShell/CyComAgent with real pointer, keyboard, CDP screenshots, deep rendered state and accessibility metadata.",
+  "icons": {
+    "16": "icons/cycom-16.png",
+    "32": "icons/cycom-32.png",
+    "48": "icons/cycom-48.png",
+    "128": "icons/cycom-128.png"
+  },
+  "permissions": ["tabs", "tabGroups", "scripting", "activeTab", "debugger", "alarms"],
   "host_permissions": ["<all_urls>"],
   "background": {"service_worker": "background.js", "type": "module"},
   "content_security_policy": {"extension_pages": "default-src 'self'; connect-src 'self' ws://127.0.0.1:17373 http://127.0.0.1:17373;"},
-  "action": {"default_title": "CyCom Browser Bridge"}
+  "action": {
+    "default_title": "CyCom Browser Bridge",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/cycom-16.png",
+      "32": "icons/cycom-32.png"
+    }
+  }
 }

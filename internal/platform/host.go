@@ -19,6 +19,17 @@ func IsTermux() bool {
 	return prefix != "." && strings.Contains(prefix, "/com.termux/")
 }
 
+// IsAndroidHybrid reports whether the Android runtime is a root/system host
+// that bridges Android app APIs through a separate app-context adapter.
+func IsAndroidHybrid() bool {
+	return runtime.GOOS == "android" && strings.TrimSpace(os.Getenv("CYCOM_ANDROID_HYBRID")) != ""
+}
+
+// HasAndroidAssistant reports whether semantic Android assistant tools can be exposed.
+func HasAndroidAssistant() bool {
+	return IsTermux() || IsAndroidHybrid()
+}
+
 // DefaultShell returns a shell that exists in the current host environment.
 // Termux does not provide /bin/sh; its shell lives below $PREFIX/bin.
 func DefaultShell() string {
@@ -43,6 +54,56 @@ func DefaultShell() string {
 		return shell
 	}
 	return "sh"
+}
+
+// TermuxBinDirs returns candidate Termux bin directories. On the Android hybrid
+// runtime the agent itself is a root/system process, so PREFIX is unset even
+// though a Termux installation may exist on the device and hold useful tooling
+// (git, node, java, curl). Looking those directories up explicitly keeps those
+// binaries discoverable instead of silently reporting them as missing.
+func TermuxBinDirs() []string {
+	var out []string
+	if prefix := strings.TrimSpace(os.Getenv("PREFIX")); prefix != "" {
+		out = append(out, filepath.Join(prefix, "bin"))
+	}
+	if IsAndroidHybrid() {
+		out = append(out,
+			"/data/data/com.termux/files/usr/bin",
+			"/data/data/com.termux/files/bin",
+		)
+	}
+	return out
+}
+
+// AugmentPATH prepends any discovered Termux bin directories to PATH so
+// exec.LookPath and child processes can find those binaries. Directories that
+// do not exist are skipped, and PATH is left untouched when nothing is added so
+// non-Android hosts keep their exact environment.
+func AugmentPATH() string {
+	current := os.Getenv("PATH")
+	parts := strings.Split(current, string(os.PathListSeparator))
+	existing := map[string]bool{}
+	for _, p := range parts {
+		if p != "" {
+			existing[p] = true
+		}
+	}
+	var added []string
+	for _, dir := range TermuxBinDirs() {
+		if existing[dir] {
+			continue
+		}
+		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+			continue
+		}
+		added = append(added, dir)
+	}
+	if len(added) == 0 {
+		return current
+	}
+	joined := strings.Join(append(added, parts...), string(os.PathListSeparator))
+	_ = os.Setenv("PATH", joined)
+	return joined
 }
 
 // IsDarwin reports whether the runtime is macOS.

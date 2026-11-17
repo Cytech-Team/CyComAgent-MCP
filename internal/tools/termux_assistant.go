@@ -24,7 +24,7 @@ type assistantCommandResult struct {
 }
 
 func registerTermuxAssistant(r *registry.Registry) {
-	if !platform.IsTermux() {
+	if !platform.HasAndroidAssistant() {
 		return
 	}
 

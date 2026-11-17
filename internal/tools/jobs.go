@@ -11,7 +11,11 @@ import (
 )
 
 func registerJobs(r *registry.Registry, jm *jobs.Manager) {
-	must(r.Add(registry.Tool{Name: "job_list", Description: "List persistent background jobs known to this machine runtime.", InputSchema: registry.ObjectSchema(nil, nil), Source: "core", Annotations: map[string]any{"readOnlyHint": true}, Handler: func(context.Context, json.RawMessage) (any, error) { return jm.List(), nil }}))
+	must(r.Add(registry.Tool{Name: "job_list", Description: "List persistent background jobs known to this machine runtime.", InputSchema: registry.ObjectSchema(nil, nil), Source: "core", Annotations: map[string]any{"readOnlyHint": true}, Handler: func(context.Context, json.RawMessage) (any, error) {
+		// MCP requires structuredContent to be an object, so the job array is
+		// returned under a named key rather than as a bare list.
+		return map[string]any{"jobs": jm.List()}, nil
+	}}))
 	must(r.Add(registry.Tool{Name: "job_get", Description: "Inspect one persistent background job.", InputSchema: registry.ObjectSchema(map[string]any{"id": registry.String("job id")}, []string{"id"}), Source: "core", Annotations: map[string]any{"readOnlyHint": true}, Handler: func(_ context.Context, raw json.RawMessage) (any, error) {
 		var in struct {
 			ID string `json:"id"`

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/trace"
 )
 
 type Handler func(context.Context, json.RawMessage) (any, error)
@@ -332,6 +334,10 @@ func (r *Registry) List() []Tool {
 }
 
 func (r *Registry) Call(ctx context.Context, name string, args json.RawMessage) (value any, callErr error) {
+	if trace.TraceID(ctx) == "" {
+		ctx = trace.WithTraceID(ctx, trace.NewID())
+	}
+	ctx = trace.WithCallID(ctx, trace.NewID())
 	r.mu.RLock()
 	t, ok := r.tools[name]
 	interceptors := append([]Interceptor{}, r.interceptors...)

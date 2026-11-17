@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT"
+
+VERSION="$(cat internal/buildinfo/VERSION 2>/dev/null || printf 'unknown')"
+usage() {
+  cat <<USAGE
+CyComAgent unified platform orchestrator (v${VERSION})
+
+Usage:
+  ./cycom detect                 Detect the current platform and architecture
+  ./cycom build [--all]          Build for this host, or every supported target
+  ./cycom test                   Run Go tests and vet
+  ./cycom release                Build all supported release packages locally
+  ./cycom help                   Show this help
+
+Supported release targets:
+  Linux amd64, Android/Termux arm64, macOS arm64+amd64, Windows bridge package
+
+Notes:
+  iOS is detected as a platform but is not a supported build target yet.
+  Android native app packaging is not the same artifact as the Termux runtime.
+USAGE
+}
+
+host_os() {
+  case "$(uname -s 2>/dev/null || printf unknown)" in
+    Linux)
+      case "${PREFIX:-}" in */com.termux/*) printf termux ;;
+        *) if command -v getprop >/dev/null 2>&1; then printf android; else printf linux; fi ;;
+      esac ;;
+    Darwin)
+      case "${HOME:-}" in /var/mobile/*) printf ios ;; *) printf macos ;; esac ;;
+    MINGW*|MSYS*|CYGWIN*) printf windows ;;
+    *) printf unknown ;;
+  esac
+}
+host_arch() {
+  case "$(uname -m 2>/dev/null || printf unknown)" in
+    x86_64|amd64) printf amd64 ;;
+    aarch64|arm64) printf arm64 ;;
+    *) uname -m 2>/dev/null || printf unknown ;;
+  esac
+}
+
+cmd="${1:-help}"
+shift || true
+case "$cmd" in
+  help|-h|--help) usage ;;
+  detect)
+    os="$(host_os)"; arch="$(host_arch)"
+    printf 'Platform: %s\nArchitecture: %s\nVersion: %s\n' "$os" "$arch" "$VERSION"
+    case "$os/$arch" in
+      linux/amd64) echo 'Build target: Linux amd64 (systemd + root broker)' ;;
+      termux/arm64) echo 'Build target: Android/Termux arm64 (mobile_assistant)' ;;
+      android/*) echo 'Build target: native Android app not implemented; Termux is a separate supported runtime' ;;
+      macos/arm64|macos/amd64) echo "Build target: macOS $arch (LaunchAgent)" ;;
+      windows/amd64|windows/arm64) echo "Build target: Windows $arch (PowerShell bridge package)" ;;
+      ios/*) echo 'Build target: iOS detected; unsupported (requires a native app + signing pipeline)' ;;
+      *) echo 'Build target: unsupported host/architecture'; exit 2 ;;
+    esac
+    ;;
+  test)
+    make test vet
+    ;;
+  build)
+    all=0
+    [[ "${1:-}" == "--all" ]] && all=1
+    if (( all )); then
+      make build build-termux build-termux-tunnel build-macos release-windows
+      echo 'Built all currently supported targets. iOS/native Android app are not available.'
+    else
+      os="$(host_os)"; arch="$(host_arch)"
+      case "$os/$arch" in
+        linux/amd64) make build ;;
+        termux/arm64) make build-termux build-termux-tunnel ;;
+      android/*) echo 'Native Android app packaging is not implemented; use the Termux ARM64 runtime where applicable.' >&2; exit 2 ;;
+        macos/arm64|macos/amd64) make build-macos ;;
+        windows/*) make release-windows ;;
+        ios/*) echo 'iOS build is not implemented; native app/signing pipeline required.' >&2; exit 2 ;;
+        *) echo "Unsupported target: $os/$arch" >&2; exit 2 ;;
+      esac
+    fi
+    ;;
+  release)
+    make release-all
+    echo "Release packages are ready in dist/ (version ${VERSION})."
+    echo 'This command does not commit, push, create a tag, or publish a GitHub Release.'
+    ;;
+  *) echo "Unknown command: $cmd" >&2; usage >&2; exit 2 ;;
+esac

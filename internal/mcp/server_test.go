@@ -9,7 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/audit"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/registry"
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/sessions"
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/trace"
 )
 
 func testServer(t *testing.T) *Server {
@@ -325,5 +328,67 @@ func TestOriginValidationAllowsLoopbackOrigin(t *testing.T) {
 	s.HTTPHandler("").ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestToolCallPropagatesSessionMetadataToHandlerAndAudit(t *testing.T) {
+	stateDir := t.TempDir()
+	sm, err := sessions.New(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ss, err := sm.Create("integration", "test-agent", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	al, err := audit.New(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := registry.New()
+	var seen string
+	if err := r.Add(registry.Tool{Name: "session_echo", Description: "session echo", InputSchema: registry.ObjectSchema(nil, nil), Handler: func(ctx context.Context, _ json.RawMessage) (any, error) {
+		seen = trace.SessionID(ctx)
+		return map[string]any{"session_id": seen}, nil
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	r.AddInterceptor(al)
+	s := &Server{Name: "test", Version: "1", Registry: r, Sessions: sm}
+	body := `{"jsonrpc":"2.0","id":55,"method":"tools/call","params":{"name":"session_echo","arguments":{"reason":"verify session propagation"},"_meta":{"sessionId":"` + ss.ID + `"}}}`
+	rr := modernRequest(t, s, body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if seen != ss.ID {
+		t.Fatalf("handler session=%q want %q", seen, ss.ID)
+	}
+	events, err := al.Tail(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].SessionID != ss.ID || events[0].TraceID == "" || events[0].CallID == "" {
+		t.Fatalf("audit did not preserve context: %+v", events)
+	}
+	updated, err := sm.Get(ss.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != "active" {
+		t.Fatalf("session was not touched: %s", updated.Status)
+	}
+}
+
+func TestToolCallRejectsUnknownSessionMetadata(t *testing.T) {
+	sm, err := sessions.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := testServer(t)
+	s.Sessions = sm
+	body := `{"jsonrpc":"2.0","id":56,"method":"tools/call","params":{"name":"echo","arguments":{"message":"hi","reason":"test invalid session"},"_meta":{"sessionId":"ses_missing"}}}`
+	rr := modernRequest(t, s, body)
+	if !strings.Contains(rr.Body.String(), "invalid or inactive session") {
+		t.Fatalf("unexpected response: %s", rr.Body.String())
 	}
 }

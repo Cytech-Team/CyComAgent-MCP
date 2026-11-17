@@ -16,6 +16,7 @@ import (
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/platform"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/registry"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/sessionbridge"
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/trace"
 )
 
 const defaultExecTimeout = 120 * time.Second
@@ -236,7 +237,7 @@ func processSpawn(ctx context.Context, in processSpawnInput, deps processDeps) (
 		if shell == "" {
 			shell = platform.DefaultShell()
 		}
-		return deps.Jobs.StartExternal(in.Command, in.Cwd, shell, in.Env, executionContext, func(logFile string) (int, int, error) {
+		return deps.Jobs.StartExternalWithSession(in.Command, in.Cwd, shell, in.Env, executionContext, trace.SessionID(ctx), func(logFile string) (int, int, error) {
 			res, err := deps.Session.Spawn(ctx, sessionbridge.SpawnRequest{
 				Command: in.Command, Cwd: in.Cwd, Env: in.Env, Shell: shell, LogFile: logFile,
 			})
@@ -246,7 +247,7 @@ func processSpawn(ctx context.Context, in processSpawnInput, deps processDeps) (
 			return res.PID, res.PGID, nil
 		})
 	}
-	return deps.Jobs.StartWithContext(in.Command, in.Cwd, in.Shell, in.Env, executionContext)
+	return deps.Jobs.StartWithSession(in.Command, in.Cwd, in.Shell, in.Env, executionContext, trace.SessionID(ctx))
 }
 
 func executionContextNeedsBridgeProbe(requested, command string, privileged bool) bool {

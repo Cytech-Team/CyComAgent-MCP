@@ -17,7 +17,7 @@ import (
 
 func TestProcessExecTimeoutKillsProcessGroup(t *testing.T) {
 	pidfile := filepath.Join(t.TempDir(), "pid")
-	raw, _ := json.Marshal(map[string]any{"command": "sleep 30 & echo $! > '" + pidfile + "'; wait", "timeout_seconds": 1})
+	raw, _ := json.Marshal(map[string]any{"command": "sleep 30 & echo $! > '" + pidfile + "'; wait", "shell": "/bin/sh", "timeout_seconds": 1})
 	out, err := processExec(context.Background(), raw, broker.Client{}, sessionbridge.NewClient(filepath.Join(t.TempDir(), "missing-session.sock")))
 	if err != nil {
 		t.Fatal(err)

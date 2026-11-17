@@ -85,6 +85,7 @@ func TestBridgeExecTimeoutKillsProcessGroup(t *testing.T) {
 	defer cancel()
 	res, err := client.Exec(ctx, ExecRequest{
 		Command:        "sleep 30 & echo $! > '" + pidFile + "'; wait",
+		Shell:          "/bin/sh",
 		TimeoutSeconds: 1,
 	})
 	if err != nil {

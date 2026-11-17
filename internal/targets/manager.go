@@ -304,7 +304,7 @@ func (m *Manager) Copy(ctx context.Context, name, direction, source, dest string
 	}
 	cctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
-	args := []string{"-q", "-P", strconv.Itoa(t.Port), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=" + strconv.Itoa(min(timeoutSeconds, 30))}
+	args := []string{"-q", "-P", strconv.Itoa(t.Port), "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=" + strconv.Itoa(min(timeoutSeconds, 30))}
 	if recursive {
 		args = append(args, "-r")
 	}
@@ -312,6 +312,9 @@ func (m *Manager) Copy(ctx context.Context, name, direction, source, dest string
 		args = append(args, "-i", t.IdentityFile)
 	}
 	for _, o := range t.SSHOptions {
+		if isHostKeyPolicyOption(o) {
+			continue
+		}
 		args = append(args, "-o", o)
 	}
 	remote := destination(t) + ":"
@@ -332,14 +335,29 @@ func (m *Manager) sshArgs(t Target, connectTimeout int) []string {
 	if connectTimeout <= 0 {
 		connectTimeout = 10
 	}
-	args := []string{"-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=" + strconv.Itoa(connectTimeout), "-p", strconv.Itoa(t.Port)}
+	args := []string{"-o", "BatchMode=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=" + strconv.Itoa(connectTimeout), "-p", strconv.Itoa(t.Port)}
 	if t.IdentityFile != "" {
 		args = append(args, "-i", t.IdentityFile)
 	}
 	for _, o := range t.SSHOptions {
+		if isHostKeyPolicyOption(o) {
+			continue
+		}
 		args = append(args, "-o", o)
 	}
 	return args
+}
+
+func isHostKeyPolicyOption(option string) bool {
+	fields := strings.Fields(option)
+	if len(fields) == 0 {
+		return false
+	}
+	key := strings.TrimSuffix(fields[0], "=")
+	if i := strings.IndexByte(key, '='); i >= 0 {
+		key = key[:i]
+	}
+	return strings.EqualFold(key, "StrictHostKeyChecking")
 }
 
 func buildRemoteCommand(t Target, in ExecOptions) (string, error) {

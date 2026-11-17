@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,9 +13,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	goruntime "runtime"
+	"sort"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/audit"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/buildinfo"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/platform"
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/runtime"
@@ -50,11 +55,16 @@ func main() {
 	if *pluginDir == "" {
 		*pluginDir = filepath.Join(*stateDir, "plugins.d")
 	}
+	// Run before any capability detection so Termux-provided binaries are found
+	// on the Android root runtime, where PREFIX is not set for this process.
+	platform.AugmentPATH()
 	if *mode == "http" && !runtime.IsLoopbackAddr(*addr) && *token == "" && !*allowRemote {
 		log.Fatal("refusing unauthenticated non-loopback bind; set CYCOM_TOKEN or explicitly allow it")
 	}
 	instructions := ""
-	if platform.IsTermux() {
+	if platform.IsAndroidHybrid() {
+		instructions = "CyComAgent is running in Android full_hybrid mode as the system/root automation runtime. Prefer assistant_* semantic Android tools for app-context phone actions; these are bridged through a separate Android app-context transport. Use process_exec/fs_*/target_* for root/system operations. The main runtime itself may be root while Android app APIs execute through the bridge. Sensitive phone capabilities remain policy- and Android-permission-gated."
+	} else if platform.IsTermux() {
 		instructions = "CyComAgent is running in Termux mobile_assistant mode. Prefer assistant_* semantic Android tools for normal phone actions and conversation-like behavior; use android_api_* only for capabilities without a semantic wrapper, and use process_exec/fs_*/target_* for advanced computer-style work. Never attempt Android device root, su, Magisk, bootloader/root escalation, or a local Android root broker. Remote SSH sudo and sudo inside non-root proot/container environments remain valid where explicitly requested and permitted. Sensitive phone capabilities are policy- and Android-permission-gated."
 	} else if goruntime.GOOS == "darwin" {
 		instructions = "CyComAgent is running in experimental macOS mode. The portable Go core is available; launchd, screencapture and AppleScript/cliclick adapters may require normal macOS TCC permissions. Local privileged execution is intentionally unavailable until a native macOS privilege broker exists."
@@ -79,6 +89,72 @@ func main() {
 	}
 }
 
+type traceCall struct {
+	CallID     string    `json:"call_id"`
+	SessionID  string    `json:"session_id,omitempty"`
+	Time       time.Time `json:"time"`
+	Tool       string    `json:"tool"`
+	DurationMS int64     `json:"duration_ms"`
+	OK         bool      `json:"ok"`
+}
+type traceGroup struct {
+	TraceID    string      `json:"trace_id"`
+	StartedAt  time.Time   `json:"started_at"`
+	EndedAt    time.Time   `json:"ended_at"`
+	TotalCalls int         `json:"total_calls"`
+	Succeeded  int         `json:"succeeded"`
+	Failed     int         `json:"failed"`
+	Calls      []traceCall `json:"calls"`
+}
+
+func groupTraceEvents(events []audit.Event, rawQuery, traceFilter string) []traceGroup {
+	groups := make(map[string]*traceGroup)
+	order := make([]string, 0)
+	query := strings.ToLower(strings.TrimSpace(rawQuery))
+	traceFilter = strings.TrimSpace(traceFilter)
+	for _, ev := range events {
+		id := ev.TraceID
+		if id == "" {
+			id = "legacy:" + ev.CallID
+		}
+		if id == "legacy:" {
+			id += ev.Time.Format(time.RFC3339Nano)
+		}
+		if traceFilter != "" && id != traceFilter {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(ev.Tool), query) && !strings.Contains(strings.ToLower(id), query) && !strings.Contains(strings.ToLower(ev.CallID), query) && !strings.Contains(strings.ToLower(ev.SessionID), query) {
+			continue
+		}
+		g := groups[id]
+		if g == nil {
+			g = &traceGroup{TraceID: id, StartedAt: ev.Time, EndedAt: ev.Time, Calls: make([]traceCall, 0)}
+			groups[id] = g
+			order = append(order, id)
+		}
+		if ev.Time.Before(g.StartedAt) {
+			g.StartedAt = ev.Time
+		}
+		if ev.Time.After(g.EndedAt) {
+			g.EndedAt = ev.Time
+		}
+		g.TotalCalls++
+		if ev.OK {
+			g.Succeeded++
+		} else {
+			g.Failed++
+		}
+		g.Calls = append(g.Calls, traceCall{CallID: ev.CallID, SessionID: ev.SessionID, Time: ev.Time, Tool: ev.Tool, DurationMS: ev.DurationMS, OK: ev.OK})
+	}
+	out := make([]traceGroup, 0, len(order))
+	for _, id := range order {
+		g := groups[id]
+		sort.Slice(g.Calls, func(i, j int) bool { return g.Calls[i].Time.Before(g.Calls[j].Time) })
+		out = append(out, *g)
+	}
+	return out
+}
+
 func runHTTP(rt *runtime.Runtime, addr, token string) {
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", rt.MCP().HTTPHandler(token))
@@ -86,10 +162,88 @@ func runHTTP(rt *runtime.Runtime, addr, token string) {
 	mux.HandleFunc("/readyz", rt.Readyz)
 	mux.HandleFunc("/health", rt.Health)
 	mux.HandleFunc("/metrics", rt.Metrics)
-	mux.HandleFunc("/inspector", inspectorPage)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		inspectorV2Page(w, r)
+	})
+	mux.HandleFunc("/mission-control", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/", http.StatusTemporaryRedirect) })
+	mux.HandleFunc("/mission-control/assets/", missionControlAsset)
+	mux.HandleFunc("/mission-control/api/snapshot", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if token != "" && !validDashboardToken(req, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		snapshot, err := rt.MissionControl()
+		if err != nil {
+			http.Error(w, "mission control unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(snapshot)
+	})
+	mux.HandleFunc("/mission-control/api/sessions/", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if token != "" && !validDashboardToken(req, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		id := strings.Trim(strings.TrimPrefix(req.URL.Path, "/mission-control/api/sessions/"), "/")
+		if id == "" || strings.Contains(id, "/") {
+			http.Error(w, "invalid session id", http.StatusBadRequest)
+			return
+		}
+		detail, err := rt.SessionDetail(id)
+		if err != nil {
+			http.Error(w, "session not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(detail)
+	})
+	mux.HandleFunc("/mission-control/api/traces", func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if token != "" && !validDashboardToken(req, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+		if limit <= 0 || limit > 1000 {
+			limit = 500
+		}
+		events, err := rt.AuditTail(limit)
+		if err != nil {
+			http.Error(w, "trace data unavailable", http.StatusInternalServerError)
+			return
+		}
+		out := groupTraceEvents(events, req.URL.Query().Get("q"), req.URL.Query().Get("trace_id"))
+
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"traces": out, "count": len(out), "generated_at": time.Now().UTC()})
+	})
+	mux.HandleFunc("/inspector", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/", http.StatusTemporaryRedirect) })
+	mux.HandleFunc("/inspector/assets/", inspectorV2Asset)
 	mux.HandleFunc("/inspector/events", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		events, err := rt.AuditTail(200)
+		events, err := inspectorAuditTail(rt, 200)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -121,6 +275,56 @@ func runHTTP(rt *runtime.Runtime, addr, token string) {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+}
+
+func inspectorAuditTail(rt *runtime.Runtime, limit int) ([]audit.Event, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	primary, err := rt.AuditTail(limit)
+	if err != nil {
+		return nil, err
+	}
+	events := append([]audit.Event(nil), primary...)
+	primaryDir := filepath.Clean(filepath.Join(rt.StateDir(), "audit"))
+	seenDirs := map[string]bool{primaryDir: true}
+	extraDirs := make([]string, 0, 4)
+	if raw := os.Getenv("CYCOM_INSPECTOR_EXTRA_AUDIT_DIRS"); raw != "" {
+		extraDirs = append(extraDirs, filepath.SplitList(raw)...)
+	}
+	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
+		extraDirs = append(extraDirs, filepath.Join(xdg, "cycomagent", "audit"))
+	}
+	if home, homeErr := os.UserHomeDir(); homeErr == nil && home != "" {
+		extraDirs = append(extraDirs, filepath.Join(home, ".local", "state", "cycomagent", "audit"))
+	}
+	for _, dir := range extraDirs {
+		dir = filepath.Clean(dir)
+		if dir == "." || dir == "" || seenDirs[dir] {
+			continue
+		}
+		seenDirs[dir] = true
+		more, tailErr := audit.TailDir(dir, limit)
+		if tailErr != nil {
+			continue
+		}
+		events = append(events, more...)
+	}
+	sort.SliceStable(events, func(i, j int) bool { return events[i].Time.After(events[j].Time) })
+	out := make([]audit.Event, 0, limit)
+	seenEvents := make(map[string]bool, len(events))
+	for _, ev := range events {
+		key := ev.Time.UTC().Format(time.RFC3339Nano) + "\x00" + ev.Tool + "\x00" + ev.ArgsSHA256 + "\x00" + ev.Reason + "\x00" + ev.Error
+		if seenEvents[key] {
+			continue
+		}
+		seenEvents[key] = true
+		out = append(out, ev)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
 func requestLog(next http.Handler) http.Handler {
@@ -163,7 +367,13 @@ func init() {
 	log.SetPrefix("cycomagent ")
 }
 
-func inspectorPage(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>CyComAgent Live Inspector</title><style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0b0d12;color:#e8eaf0;font:14px system-ui,sans-serif}.wrap{max-width:1100px;margin:auto;padding:28px}.top{display:flex;justify-content:space-between;align-items:center}.live,.ok{color:#55e68a}.bad{color:#ff6b78}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:22px 0}.card,.event{background:#141821;border:1px solid #252b38;border-radius:14px;padding:16px}.num{font-size:25px;font-weight:700}.event{margin:10px 0;display:grid;grid-template-columns:110px 190px 100px 1fr;gap:14px}.tool{font-family:monospace;font-weight:700}.reason{color:#c7ccd8}.muted{color:#7f8798;font-size:12px}@media(max-width:760px){.cards{grid-template-columns:1fr 1fr}.event{grid-template-columns:1fr}.wrap{padding:16px}}</style></head><body><div class="wrap"><div class="top"><div><h1>CyComAgent Live Inspector</h1><div class="muted">Every tool call must include a reason.</div></div><b class="live">● LIVE</b></div><div class="cards"><div class="card"><div class="muted">Calls</div><div id="calls" class="num">-</div></div><div class="card"><div class="muted">Success</div><div id="success" class="num">-</div></div><div class="card"><div class="muted">Failed</div><div id="failed" class="num">-</div></div><div class="card"><div class="muted">Last update</div><div id="updated" class="num" style="font-size:17px">-</div></div></div><div id="events"></div></div><script>function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML}async function tick(){try{var r=await fetch('/inspector/events',{cache:'no-store'}),d=await r.json(),e=d.events||[];document.getElementById('calls').textContent=e.length;document.getElementById('success').textContent=e.filter(function(x){return x.ok}).length;document.getElementById('failed').textContent=e.filter(function(x){return !x.ok}).length;document.getElementById('updated').textContent=new Date().toLocaleTimeString();document.getElementById('events').innerHTML=e.map(function(x){return '<div class="event"><div><div>'+new Date(x.time).toLocaleTimeString()+'</div><div class="muted">'+x.duration_ms+' ms</div></div><div class="tool">'+esc(x.tool)+'</div><div class="'+(x.ok?'ok':'bad')+'">'+(x.ok?'✓ Success':'✕ Failed')+'</div><div><div class="reason">'+esc(x.reason||'Legacy call - no reason recorded')+'</div>'+(x.error?'<div class="bad muted">'+esc(x.error)+'</div>':'')+'</div></div>'}).join('')}catch(e){document.getElementById('updated').textContent='Disconnected'}}tick();setInterval(tick,750);</script></body></html>`))
+func validDashboardToken(r *http.Request, expected string) bool {
+	provided := r.Header.Get("X-CyCom-Token")
+	if provided == "" {
+		provided = strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	}
+	if len(provided) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
 }

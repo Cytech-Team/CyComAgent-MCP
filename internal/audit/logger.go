@@ -12,9 +12,14 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/trace"
 )
 
 type Event struct {
+	TraceID    string    `json:"trace_id,omitempty"`
+	CallID     string    `json:"call_id,omitempty"`
+	SessionID  string    `json:"session_id,omitempty"`
 	Time       time.Time `json:"time"`
 	Tool       string    `json:"tool"`
 	ArgsSHA256 string    `json:"args_sha256"`
@@ -25,10 +30,11 @@ type Event struct {
 }
 
 type ActiveCall struct {
-	ID     string    `json:"id"`
-	Time   time.Time `json:"time"`
-	Tool   string    `json:"tool"`
-	Reason string    `json:"reason,omitempty"`
+	TraceID string    `json:"trace_id,omitempty"`
+	ID      string    `json:"id"`
+	Time    time.Time `json:"time"`
+	Tool    string    `json:"tool"`
+	Reason  string    `json:"reason,omitempty"`
 }
 
 type Logger struct {
@@ -45,7 +51,7 @@ func New(stateDir string) (*Logger, error) {
 	return &Logger{dir: dir, active: make(map[string]ActiveCall)}, nil
 }
 
-func callID(tool string, args json.RawMessage) string {
+func callIDForLegacy(tool string, args json.RawMessage) string {
 	sum := sha256.Sum256(append(append([]byte(tool), 0), args...))
 	return hex.EncodeToString(sum[:])
 }
@@ -57,21 +63,32 @@ func callReason(args json.RawMessage) string {
 	return reason
 }
 
-func (l *Logger) BeforeCall(_ context.Context, tool string, args json.RawMessage) error {
-	call := ActiveCall{ID: callID(tool, args), Time: time.Now().UTC(), Tool: tool, Reason: callReason(args)}
+func (l *Logger) BeforeCall(ctx context.Context, tool string, args json.RawMessage) error {
+	id := trace.CallID(ctx)
+	if id == "" {
+		id = callIDForLegacy(tool, args)
+	}
+	call := ActiveCall{TraceID: trace.TraceID(ctx), ID: id, Time: time.Now().UTC(), Tool: tool, Reason: callReason(args)}
 	l.mu.Lock()
 	l.active[call.ID] = call
 	l.mu.Unlock()
 	return nil
 }
 
-func (l *Logger) AfterCall(_ context.Context, tool string, args json.RawMessage, d time.Duration, callErr error) {
+func (l *Logger) AfterCall(ctx context.Context, tool string, args json.RawMessage, d time.Duration, callErr error) {
 	sum := sha256.Sum256(args)
 	reason := callReason(args)
+	callID := trace.CallID(ctx)
+	if callID == "" {
+		callID = callIDForLegacy(tool, args)
+	}
 	l.mu.Lock()
-	delete(l.active, callID(tool, args))
+	delete(l.active, callID)
 	l.mu.Unlock()
 	ev := Event{
+		TraceID:    trace.TraceID(ctx),
+		CallID:     callID,
+		SessionID:  trace.SessionID(ctx),
 		Time:       time.Now().UTC(),
 		Tool:       tool,
 		ArgsSHA256: hex.EncodeToString(sum[:]),
@@ -110,10 +127,14 @@ func (l *Logger) Active() []ActiveCall {
 }
 
 func (l *Logger) Tail(limit int) ([]Event, error) {
+	return TailDir(l.dir, limit)
+}
+
+func TailDir(dir string, limit int) ([]Event, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	entries, err := os.ReadDir(l.dir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +147,7 @@ func (l *Logger) Tail(limit int) ([]Event, error) {
 	sort.Sort(sort.Reverse(sort.StringSlice(names)))
 	out := make([]Event, 0, limit)
 	for _, name := range names {
-		f, err := os.Open(filepath.Join(l.dir, name))
+		f, err := os.Open(filepath.Join(dir, name))
 		if err != nil {
 			continue
 		}

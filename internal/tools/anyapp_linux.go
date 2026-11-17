@@ -67,18 +67,37 @@ func registerAnyApp(r *registry.Registry) {
 		if spec.InputSchema == nil {
 			spec.InputSchema = registry.ObjectSchema(nil, nil)
 		}
-		_ = r.Add(registry.Tool{
-			Name:         name,
-			Title:        spec.Title,
-			Description:  description,
-			InputSchema:  spec.InputSchema,
-			OutputSchema: spec.OutputSchema,
-			Annotations:  spec.Annotations,
-			Source:       "core:anyapp",
-			Handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
-				return client.callTool(ctx, spec.Name, raw)
-			},
-		})
+		handler := func(ctx context.Context, raw json.RawMessage) (any, error) {
+			return client.callTool(ctx, spec.Name, raw)
+		}
+		tool := registry.Tool{
+			Name: name, Title: spec.Title, Description: description,
+			InputSchema: spec.InputSchema, OutputSchema: spec.OutputSchema,
+			Annotations: spec.Annotations, Source: "core:anyapp", Handler: handler,
+		}
+		_ = r.Add(tool)
+		// ChatGPT Computer Use compatibility tools are intentionally exposed
+		// without the anyapp_ prefix as well. Keep their schema and handler
+		// byte-for-byte aligned with the upstream Any App tools/list response.
+		if isComputerUseCompatibilityAlias(spec.Name) {
+			tool.Name = spec.Name
+			tool.Description = "Compatibility alias: " + description
+			_ = r.Add(tool)
+		}
+		if spec.Name == "list_windows" {
+			tool.Name = "window_list"
+			tool.Description = "Compatibility alias: list live compositor windows through Any App."
+			_ = r.Add(tool)
+		}
+	}
+}
+
+func isComputerUseCompatibilityAlias(name string) bool {
+	switch name {
+	case "click", "drag", "focused_window", "get_app_state", "list_windows", "perform_action", "press_key", "screenshot", "scroll", "set_value", "type_text":
+		return true
+	default:
+		return false
 	}
 }
 

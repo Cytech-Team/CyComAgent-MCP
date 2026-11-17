@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/trace"
 )
 
 func TestRegistryAddListCall(t *testing.T) {
@@ -389,4 +392,63 @@ func TestRegistryReasonErrorIsStable(t *testing.T) {
 			t.Errorf("raw=%s error=%v", raw, err)
 		}
 	}
+}
+
+func TestRegistryPropagatesTraceAndUniqueCallIDsConcurrently(t *testing.T) {
+	type ids struct{ traceID, callID string }
+	var mu sync.Mutex
+	seen := make([]ids, 0, 2)
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	r := New()
+	r.AddInterceptor(testContextInterceptor{record: func(ctx context.Context) {
+		mu.Lock()
+		seen = append(seen, ids{trace.TraceID(ctx), trace.CallID(ctx)})
+		mu.Unlock()
+	}})
+	if err := r.Add(Tool{Name: "wait", InputSchema: ObjectSchema(nil, nil), Handler: func(ctx context.Context, _ json.RawMessage) (any, error) {
+		started <- struct{}{}
+		select {
+		case <-release:
+			return nil, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := trace.WithTraceID(context.Background(), "same-parent-trace")
+	args := json.RawMessage(`{"reason":"concurrent correlation test"}`)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := r.Call(ctx, "wait", args); err != nil {
+				t.Errorf("Call: %v", err)
+			}
+		}()
+	}
+	<-started
+	<-started
+	close(release)
+	wg.Wait()
+	if len(seen) != 2 {
+		t.Fatalf("recorded %d calls", len(seen))
+	}
+	if seen[0].traceID != "same-parent-trace" || seen[1].traceID != "same-parent-trace" {
+		t.Fatalf("trace IDs not propagated: %#v", seen)
+	}
+	if seen[0].callID == "" || seen[1].callID == "" || seen[0].callID == seen[1].callID {
+		t.Fatalf("call IDs are not unique: %#v", seen)
+	}
+}
+
+type testContextInterceptor struct{ record func(context.Context) }
+
+func (i testContextInterceptor) BeforeCall(ctx context.Context, _ string, _ json.RawMessage) error {
+	i.record(ctx)
+	return nil
+}
+func (testContextInterceptor) AfterCall(context.Context, string, json.RawMessage, time.Duration, error) {
 }

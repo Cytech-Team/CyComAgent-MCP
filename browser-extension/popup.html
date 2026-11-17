@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CyCom Browser Bridge</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="panel">
+    <header class="header">
+      <div>
+        <h1>CyCom Browser Bridge</h1>
+        <p id="version">Browser bridge</p>
+      </div>
+      <span id="statusDot" class="status-dot" aria-hidden="true"></span>
+    </header>
+
+    <section class="status-card">
+      <div>
+        <span class="label">Bridge</span>
+        <strong id="statusText">Checking...</strong>
+      </div>
+      <button id="reconnectBtn" class="ghost" type="button">Reconnect</button>
+    </section>
+
+    <button id="inspectorBtn" class="primary" type="button">
+      <span>CyComAgent Live Inspector</span>
+      <span class="arrow">↗</span>
+    </button>
+
+    <p class="hint">Open the live inspector at 127.0.0.1:7331.</p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

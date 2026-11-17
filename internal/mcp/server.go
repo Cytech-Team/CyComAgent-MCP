@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/Cytech-Team/CyComAgent-MCP/internal/registry"
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/sessions"
+	"github.com/Cytech-Team/CyComAgent-MCP/internal/trace"
 )
 
 const (
@@ -36,6 +38,7 @@ type Server struct {
 	// reason argument. The adapter only fills it for a valid object argument;
 	// malformed/non-object arguments remain subject to registry validation.
 	CompatMissingReason bool
+	Sessions            *sessions.Manager
 
 	requests  atomic.Uint64
 	toolCalls atomic.Uint64
@@ -310,9 +313,25 @@ func (s *Server) dispatch(ctx context.Context, req rpcRequest, modern bool) (any
 		return out, nil
 
 	case "tools/call":
+		if trace.TraceID(ctx) == "" {
+			ctx = trace.WithTraceID(ctx, trace.NewID())
+		}
 		var p toolCallParams
 		if err := json.Unmarshal(req.Params, &p); err != nil || p.Name == "" {
 			return nil, &rpcError{Code: -32602, Message: "invalid tools/call parameters"}
+		}
+		if raw, ok := p.Meta["sessionId"]; ok {
+			var sessionID string
+			if err := json.Unmarshal(raw, &sessionID); err != nil || strings.TrimSpace(sessionID) == "" || len(sessionID) > 128 {
+				return nil, &rpcError{Code: -32602, Message: "invalid sessionId metadata"}
+			}
+			if s.Sessions == nil {
+				return nil, &rpcError{Code: -32602, Message: "session context is unavailable"}
+			}
+			if _, err := s.Sessions.Touch(sessionID); err != nil {
+				return nil, &rpcError{Code: -32602, Message: "invalid or inactive session"}
+			}
+			ctx = trace.WithSessionID(ctx, sessionID)
 		}
 		if !s.Registry.Exists(p.Name) {
 			return nil, &rpcError{Code: -32602, Message: "unknown tool: " + p.Name}
@@ -337,6 +356,7 @@ func (s *Server) dispatch(ctx context.Context, req rpcRequest, modern bool) (any
 			structured = rich.Structured
 			content = rich.Content
 		}
+		structured = structuredContentObject(structured)
 		if len(content) == 0 {
 			text, _ := json.Marshal(structured)
 			content = []map[string]any{{"type": "text", "text": string(text)}}
@@ -360,6 +380,24 @@ func (s *Server) dispatch(ctx context.Context, req rpcRequest, modern bool) (any
 
 	default:
 		return nil, &rpcError{Code: -32601, Message: "method not found: " + req.Method}
+	}
+}
+
+// structuredContentObject guarantees that structuredContent is a JSON object.
+// MCP declares structuredContent to be an object, so handlers that naturally
+// return a list or scalar (for example job_list) would otherwise produce a
+// result that strict clients reject wholesale. Wrapping keeps the payload
+// reachable instead of failing the whole call.
+func structuredContentObject(value any) map[string]any {
+	switch v := value.(type) {
+	case nil:
+		return map[string]any{}
+	case map[string]any:
+		return v
+	case registry.RichResult:
+		return structuredContentObject(v.Structured)
+	default:
+		return map[string]any{"items": value}
 	}
 }
 
