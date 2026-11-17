@@ -145,6 +145,7 @@ func TestDispatchCoordinatorRejectsUnauthenticatedAndMalformedRequestsWithoutMut
 }
 
 func TestDispatchCoordinatorEmitsDurableCrashBoundariesInOrder(t *testing.T) {
+	requireSystemdScope(t)
 	identity, policy, ledger, records, manager, input := setupPreflight(t)
 	coordinator := &DispatchCoordinator{Identity: identity, PolicyStore: policy, Ledger: ledger, Records: records, Jobs: manager}
 	var stages []string
