@@ -7,7 +7,7 @@ TERMUX_STAGE := .release-termux/CyComAgent-MCP
 MACOS_STAGE := .release-macos/CyComAgent-MCP
 RELEASE_NOTES := RELEASE_NOTES_v$(VERSION).md
 
-.PHONY: all test vet build build-termux build-termux-tunnel build-macos clean release release-termux release-windows release-macos release-all
+.PHONY: all test vet build build-termux build-termux-tunnel build-macos clean release release-termux release-windows release-macos sync-assets release-all
 all: test build
 
 test:
@@ -78,7 +78,13 @@ release-macos: test vet build-macos
 	sha256sum dist/CyComAgent-MCP-v$(VERSION)-macos-arm64.tar.gz dist/CyComAgent-MCP-v$(VERSION)-macos-amd64.tar.gz | sed 's#  dist/#  #' > dist/SHA256SUMS-macos
 	rm -rf .release-macos
 
-release-all: release release-termux release-windows release-macos
+sync-assets:
+	cp dist/cycomagent dist/cycomagent-linux-amd64
+	cp dist/cycomagent-root dist/cycomagent-root-linux-amd64
+	cp dist/cycomagent-termux-arm64 dist/cycomagent-android-arm64
+	sha256sum dist/cycomagent-linux-amd64 dist/cycomagent-root-linux-amd64 dist/cycomagent-android-arm64 | sed 's#  dist/#  #' > dist/SHA256SUMS-sync
+
+release-all: release release-termux release-windows release-macos sync-assets
 
 clean:
 	rm -rf dist .release .release-termux .release-windows .release-macos

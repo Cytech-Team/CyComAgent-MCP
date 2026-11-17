@@ -35,6 +35,11 @@ jobs:
           test -s dist/CyComAgent-MCP-v"$(cat internal/buildinfo/VERSION)"-macos-arm64.tar.gz
           test -s dist/CyComAgent-MCP-v"$(cat internal/buildinfo/VERSION)"-macos-amd64.tar.gz
           test -s dist/CyComAgent-MCP-v"$(cat internal/buildinfo/VERSION)"-windows.zip
+          test -s dist/SHA256SUMS-sync
+          test -s dist/cycomagent-linux-amd64
+          test -s dist/cycomagent-root-linux-amd64
+          test -s dist/cycomagent-android-arm64
+          (cd dist && sha256sum -c SHA256SUMS-sync)
           find dist -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
