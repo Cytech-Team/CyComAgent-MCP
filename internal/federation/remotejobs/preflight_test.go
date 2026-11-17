@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,11 +17,27 @@ func setupPreflight(t *testing.T) (*nodeidentity.Manager, *PolicyStore, *Ledger,
 	t.Helper()
 	caller, receiver := trustedPair(t)
 	dir := t.TempDir()
+	workDir := filepath.Join(dir, "work")
+	if err := os.Mkdir(workDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	executable, err := exec.LookPath("true")
+	if err != nil {
+		t.Fatalf("fixture executable unavailable: %v", err)
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workDir, err = filepath.EvalSymlinks(workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	policyStore, err := OpenPolicyStore(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := ExecutionPolicy{Enabled: true, AllowedCallers: []string{caller.Public().NodeID}, AllowedExecutables: []string{"/usr/bin/printf"}, WorkingDirRoots: []string{"/tmp"}, MaxTimeout: 5 * time.Second, MaxOutputBytes: 4096, MaxArgumentCount: 4, MaxArgumentBytes: 128}
+	policy := ExecutionPolicy{Enabled: true, AllowedCallers: []string{caller.Public().NodeID}, AllowedExecutables: []string{executable}, WorkingDirRoots: []string{workDir}, MaxTimeout: 5 * time.Second, MaxOutputBytes: 4096, MaxArgumentCount: 4, MaxArgumentBytes: 128}
 	revision, err := policyStore.SaveVersioned(policy, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +54,7 @@ func setupPreflight(t *testing.T) (*nodeidentity.Manager, *PolicyStore, *Ledger,
 	if err != nil {
 		t.Fatal(err)
 	}
-	process := ProcessRequest{Executable: "/usr/bin/printf", Args: []string{"safe"}, WorkingDir: "/tmp", Timeout: time.Second}
+	process := ProcessRequest{Executable: executable, Args: []string{"safe"}, WorkingDir: workDir, Timeout: time.Second}
 	argsHash, err := HashProcessArgs(process.Args)
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +68,7 @@ func setupPreflight(t *testing.T) (*nodeidentity.Manager, *PolicyStore, *Ledger,
 	if err != nil {
 		t.Fatal(err)
 	}
-	intent := ExecutionRecord{Version: ExecutionRecordSchemaVersion, CallerNodeID: caller.Public().NodeID, RequestID: requestID, RemoteJobID: reserved.JobID, PayloadHash: reserved.PayloadHash, LocalJobID: "local-preflight-001", PolicyRevision: revision, State: "prepared", Executable: "/usr/bin/printf", WorkingDir: "/tmp", ArgsHash: argsHash, ProcessHash: processHash}
+	intent := ExecutionRecord{Version: ExecutionRecordSchemaVersion, CallerNodeID: caller.Public().NodeID, RequestID: requestID, RemoteJobID: reserved.JobID, PayloadHash: reserved.PayloadHash, LocalJobID: "local-preflight-001", PolicyRevision: revision, State: "prepared", Executable: executable, WorkingDir: workDir, ArgsHash: argsHash, ProcessHash: processHash}
 	if _, _, err := PrepareExecutionIntent(ledger, records, intent); err != nil {
 		t.Fatal(err)
 	}
